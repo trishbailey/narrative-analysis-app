@@ -1,4 +1,4 @@
-# src/narrative_terms.py
+# narrative/narrative_terms.py
 # TF-IDF "top terms" per cluster with a strong stopword list and text normalization.
 
 from __future__ import annotations
@@ -102,3 +102,23 @@ def cluster_top_terms(
             result[int(cid)] = []
             continue
         min_df_val = min_df_small if len(docs) < 5 else 2
+        terms = tfidf_top_terms(
+            docs, n_terms=n_terms, stopwords=stops, ngram_range=(1,2),
+            min_df=min_df_val, max_df=0.8
+        )
+        result[int(cid)] = terms
+    return result
+
+def cluster_terms_dataframe(
+    df: pd.DataFrame,
+    cluster_col: str = "Cluster",
+    text_col: str = "_text_norm",
+    n_terms: int = 12
+) -> pd.DataFrame:
+    """
+    Return a tidy DataFrame with Cluster, TopTerms (comma-joined).
+    """
+    df_norm = ensure_text_column(df, out_col=text_col)
+    tops = cluster_top_terms(df_norm, cluster_col=cluster_col, text_col=text_col, n_terms=n_terms)
+    rows = [{"Cluster": cid, "TopTerms": ", ".join(terms)} for cid, terms in sorted(tops.items())]
+    return pd.DataFrame(rows)
