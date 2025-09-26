@@ -1,12 +1,9 @@
+streamlit
 sentence-transformers
 scikit-learn
 pandas
-matplotlib
-seaborn
-tqdm
 plotly
 umap-learn
 nltk
-streamlit
-scipy
 spacy
+scipy
