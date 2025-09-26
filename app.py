@@ -1,19 +1,34 @@
-# app.py — Data upload → embeddings → KMeans clustering → top terms
+# app.py — Narrative Analysis (full app)
+# Features:
+# - Upload & normalize CSV (Title/Snippet/Date/URL)
+# - Embeddings (SBERT, cached)
+# - KMeans clustering (slider for K)
+# - TF-IDF top terms per cluster
+# - UMAP 2D semantic map (Plotly)
+# - KWIC search (regex) + counts + co-occurrence
+# - VADER sentiment per row + summary per cluster
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Reuse your GitHub modules
+# --- Import reusable modules you added under src/ ---
 from src.narrative_io import normalize_to_canonical
 from src.narrative_embed import load_sbert, concat_title_snippet, embed_texts
 from src.narrative_cluster import run_kmeans, attach_clusters, cluster_counts
 from src.narrative_terms import ensure_text_column, cluster_terms_dataframe
+from src.narrative_map import compute_umap, attach_coords, build_hover_html
+from src.narrative_kwic import kwic_search, kwic_counts_by_cluster, kwic_cooccurrence
+from src.narrative_sentiment import add_vader_sentiment, sentiment_by_cluster
 
+# ---------------------------
+# Page setup
+# ---------------------------
 st.set_page_config(page_title="Narrative Analysis", layout="wide")
 st.title("Narrative Analysis")
 
 # ---------------------------
-# Section 1 — Load & normalize
+# Sidebar: data loading
 # ---------------------------
 st.sidebar.header("Load Data")
 uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8)", type=["csv"])
@@ -21,7 +36,6 @@ use_demo = st.sidebar.checkbox("Use tiny demo data", value=False)
 
 df = None
 error = None
-
 try:
     if uploaded:
         raw = pd.read_csv(uploaded)
@@ -62,15 +76,15 @@ else:
         "Required columns (any alias): Title/Headline and Snippet/Summary/Description.\n"
         "Optional: Date, URL."
     )
+    st.stop()
 
-# ---------------------------------------
-# Section 2 — Embeddings + KMeans control
-# ---------------------------------------
+# ---------------------------
+# Embeddings (cached)
+# ---------------------------
 st.sidebar.header("Clustering")
 k = st.sidebar.slider("Number of clusters (KMeans)", 2, 12, 6, 1)
 run_btn = st.sidebar.button("Run clustering")
 
-# Cache the embedding model and embeddings to speed things up
 @st.cache_resource
 def get_model():
     return load_sbert("all-MiniLM-L6-v2")
@@ -82,29 +96,150 @@ def embed_df_texts(df_in: pd.DataFrame):
     emb = embed_texts(model, texts, show_progress=False)
     return emb
 
-# If user clicks "Run clustering"
-if run_btn and "df" in st.session_state and isinstance(st.session_state["df"], pd.DataFrame):
-    df_in = st.session_state["df"]
+if run_btn:
     with st.spinner("Embedding and clustering..."):
-        embeddings = embed_df_texts(df_in)
+        embeddings = embed_df_texts(st.session_state["df"])
         labels, _ = run_kmeans(embeddings, n_clusters=k)
-        df_clustered = attach_clusters(df_in, labels)
+        df_clustered = attach_clusters(st.session_state["df"], labels)
         st.session_state["df"] = df_clustered
         st.session_state["embeddings"] = embeddings
-
     st.success("Clustering complete.")
 
-# If we have clustered data in session, display results
-if "df" in st.session_state and isinstance(st.session_state["df"], pd.DataFrame) and "Cluster" in st.session_state["df"].columns:
-    df_clustered = st.session_state["df"]
+if "Cluster" not in st.session_state["df"].columns:
+    st.warning("Run clustering from the sidebar to continue.")
+    st.stop()
 
-    st.subheader("Cluster sizes")
-    counts = cluster_counts(df_clustered)
+dfc = st.session_state["df"]
+embeddings = st.session_state.get("embeddings", None)
+
+# ---------------------------
+# Results: cluster counts + top terms
+# ---------------------------
+st.subheader("Cluster sizes")
+counts = cluster_counts(dfc)
+left, right = st.columns([1,2])
+with left:
     st.dataframe(counts, use_container_width=True)
+with right:
     fig = px.bar(counts, x="Cluster", y="Count", title="Posts per Cluster")
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Top terms per cluster (TF-IDF)")
-    df_norm = ensure_text_column(df_clustered)  # builds _text_norm
-    terms_df = cluster_terms_dataframe(df_norm, n_terms=12)
-    st.dataframe(terms_df, use_container_width=True)
+st.subheader("Top terms per cluster (TF-IDF)")
+df_norm = ensure_text_column(dfc)  # builds _text_norm if missing
+terms_df = cluster_terms_dataframe(df_norm, n_terms=12)
+st.dataframe(terms_df, use_container_width=True)
+
+# Download buttons (cluster counts / top terms)
+cc_csv = counts.to_csv(index=False).encode("utf-8")
+tt_csv = terms_df.to_csv(index=False).encode("utf-8")
+col_dl1, col_dl2 = st.columns(2)
+with col_dl1:
+    st.download_button("Download cluster counts (CSV)", cc_csv, "cluster_counts.csv", "text/csv")
+with col_dl2:
+    st.download_button("Download top terms (CSV)", tt_csv, "cluster_top_terms.csv", "text/csv")
+
+# ---------------------------
+# UMAP 2D semantic map
+# ---------------------------
+st.subheader("2D Semantic Map (UMAP)")
+col_a, col_b = st.columns(2)
+with col_a:
+    n_neighbors = st.slider("UMAP: n_neighbors", 5, 50, 15, 1,
+                            help="Lower = more local structure; higher = smoother clusters.")
+with col_b:
+    min_dist = st.slider("UMAP: min_dist", 0.01, 0.50, 0.10, 0.01,
+                         help="Lower = tighter clusters; higher = more spread out.")
+
+if st.button("Generate 2D Map"):
+    if embeddings is None:
+        st.error("Embeddings not found. Run clustering first.")
+    else:
+        with st.spinner("Computing UMAP projection..."):
+            coords = compute_umap(embeddings, n_neighbors=n_neighbors, min_dist=min_dist)
+            df_map = attach_coords(dfc, coords)
+            df_map["_hover"] = build_hover_html(df_map)
+
+        fig_map = px.scatter(
+            df_map, x="x", y="y", color="Cluster",
+            hover_name="Title",
+            hover_data={"x": False, "y": False, "_hover": True, "Cluster": True},
+            title="UMAP: hover to inspect posts", opacity=0.85
+        )
+        fig_map.update_traces(hovertemplate="%{customdata[0]}")
+        fig_map.update_traces(customdata=df_map[["_hover"]].to_numpy())
+        fig_map.update_layout(legend_title_text="Cluster", template="plotly_white")
+        st.plotly_chart(fig_map, use_container_width=True)
+
+# ---------------------------
+# KWIC: keyword-in-context
+# ---------------------------
+st.subheader("Keyword-in-Context (KWIC)")
+kw_col1, kw_col2, kw_col3 = st.columns([2,1,1])
+with kw_col1:
+    kw_pattern = st.text_input("Keyword or regex (e.g., lawsuit|settlement|class action)", "")
+with kw_col2:
+    kw_window = st.number_input("Context window (chars)", min_value=20, max_value=200, value=50, step=5)
+with kw_col3:
+    cluster_filter = st.text_input("Restrict to cluster(s) (e.g., 0 or 0,2)", "")
+
+if st.button("Run KWIC") and kw_pattern.strip():
+    # Parse cluster filter
+    clusters = None
+    if cluster_filter.strip():
+        try:
+            if "," in cluster_filter:
+                clusters = [int(x.strip()) for x in cluster_filter.split(",")]
+            else:
+                clusters = int(cluster_filter.strip())
+        except:
+            st.warning("Could not parse cluster filter; searching all clusters.")
+            clusters = None
+
+    with st.spinner("Searching..."):
+        kwic_df = kwic_search(dfc, pattern=kw_pattern, window=int(kw_window), clusters=clusters)
+    st.write(f"KWIC matches: {len(kwic_df)}")
+
+    if not kwic_df.empty:
+        # Counts by cluster
+        kwic_counts = kwic_counts_by_cluster(kwic_df)
+        st.write("Matches by cluster:")
+        st.dataframe(kwic_counts, use_container_width=True)
+
+        # Co-occurrence (top terms in KWIC windows)
+        cooc_df = kwic_cooccurrence(kwic_df, top_n=20)
+        st.write("Top co-occurring terms per cluster (first rows):")
+        st.dataframe(cooc_df.head(20), use_container_width=True)
+
+        # Downloads
+        kwic_csv = kwic_df.to_csv(index=False).encode("utf-8")
+        cooc_csv = cooc_df.to_csv(index=False).encode("utf-8")
+        kc_csv   = kwic_counts.to_csv(index=False).encode("utf-8")
+
+        dl1, dl2, dl3 = st.columns(3)
+        with dl1:
+            st.download_button("Download KWIC matches (CSV)", kwic_csv, "kwic_matches.csv", "text/csv")
+        with dl2:
+            st.download_button("Download KWIC co-occurrence (CSV)", cooc_csv, "kwic_cooccurrence.csv", "text/csv")
+        with dl3:
+            st.download_button("Download KWIC counts (CSV)", kc_csv, "kwic_counts_by_cluster.csv", "text/csv")
+    else:
+        st.info("No matches for that pattern.")
+
+# ---------------------------
+# Sentiment (VADER)
+# ---------------------------
+st.subheader("Sentiment (VADER)")
+if st.button("Compute sentiment"):
+    with st.spinner("Scoring sentiment..."):
+        df_sent = add_vader_sentiment(dfc)         # adds df["Sentiment"]
+        st.session_state["df"] = df_sent           # keep the new column
+        dfc = df_sent
+
+    st.success("Sentiment computed.")
+    # Summary by cluster
+    sent_tbl = sentiment_by_cluster(dfc)
+    st.dataframe(sent_tbl, use_container_width=True)
+
+    # Download
+    sent_csv = sent_tbl.to_csv(index=False).encode("utf-8")
+    st.download_button("Download sentiment summary (CSV)", sent_csv, "sentiment_by_cluster.csv", "text/csv")
