@@ -6,7 +6,7 @@ import pandas as pd
 import re
 
 # Reuse text normalization from your terms module
-from src.narrative_terms import ensure_text_column
+from narrative.narrative_terms import ensure_text_column
 
 # NLTK VADER
 import nltk
