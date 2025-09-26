@@ -259,22 +259,53 @@ if st.button("Run KWIC") and kw_pattern.strip():
 # Sentiment (VADER)
 # ---------------------------
 st.subheader("Sentiment (VADER)")
+
+# Guard: data must be loaded
 if "df" not in st.session_state:
     st.info("Load data first.")
 else:
     dfc = st.session_state["df"]
+
+    # Guard: we summarize by cluster, so require clusters
     if "Cluster" not in dfc.columns:
         st.info("Run clustering first to see per-cluster sentiment.")
     else:
-        if st.button("Compute sentiment"):
+        # Primary action
+        compute_sent = st.button("Compute sentiment")
+
+        if compute_sent:
             with st.spinner("Scoring sentiment..."):
                 df_sent = add_vader_sentiment(dfc)  # adds df["Sentiment"]
-                st.session_state["df"] = df_sent
+                st.session_state["df"] = df_sent    # keep the new column
                 dfc = df_sent
-            st.success("Sentiment computed.")
-            sent_tbl = sentiment_by_cluster(dfc)
-            st.dataframe(sent_tbl, use_container_width=True)
 
-    # Download
-    sent_csv = sent_tbl.to_csv(index=False).encode("utf-8")
-    st.download_button("Download sentiment summary (CSV)", sent_csv, "sentiment_by_cluster.csv", "text/csv")
+            st.success("Sentiment computed.")
+
+            # Build and show the summary now that Sentiment exists
+            sent_tbl = sentiment_by_cluster(dfc)
+            st.dataframe(sent_tbl, width="stretch")
+
+            # Downloads (only after we have sent_tbl)
+            sent_csv = sent_tbl.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download sentiment summary (CSV)",
+                sent_csv,
+                "sentiment_by_cluster.csv",
+                "text/csv"
+            )
+
+        # If sentiment was computed previously in this session, show latest table
+        elif "Sentiment" in dfc.columns:
+            sent_tbl = sentiment_by_cluster(dfc)
+            st.dataframe(sent_tbl, width="stretch")
+
+            sent_csv = sent_tbl.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download sentiment summary (CSV)",
+                sent_csv,
+                "sentiment_by_cluster.csv",
+                "text/csv"
+            )
+        else:
+            st.caption("Click **Compute sentiment** to score and summarize by cluster.")
+
