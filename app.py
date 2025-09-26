@@ -139,36 +139,50 @@ with col_dl2:
     st.download_button("Download top terms (CSV)", tt_csv, "cluster_top_terms.csv", "text/csv")
 
 # ---------------------------
-# UMAP 2D semantic map
+# 2D Semantic Map (UMAP)
 # ---------------------------
 st.subheader("2D Semantic Map (UMAP)")
-col_a, col_b = st.columns(2)
-with col_a:
-    n_neighbors = st.slider("UMAP: n_neighbors", 5, 50, 15, 1,
-                            help="Lower = more local structure; higher = smoother clusters.")
-with col_b:
-    min_dist = st.slider("UMAP: min_dist", 0.01, 0.50, 0.10, 0.01,
-                         help="Lower = tighter clusters; higher = more spread out.")
 
-if st.button("Generate 2D Map"):
-    if embeddings is None:
-        st.error("Embeddings not found. Run clustering first.")
+if "df" not in st.session_state:
+    st.info("Load data first.")
+else:
+    dfc = st.session_state["df"]
+
+    # Require clusters (map is colored by cluster)
+    if "Cluster" not in dfc.columns:
+        st.info("Run clustering in the sidebar first to enable the map.")
     else:
-        with st.spinner("Computing UMAP projection..."):
-            coords = compute_umap(embeddings, n_neighbors=n_neighbors, min_dist=min_dist)
-            df_map = attach_coords(dfc, coords)
-            df_map["_hover"] = build_hover_html(df_map)
+        col_a, col_b = st.columns(2)
+        with col_a:
+            n_neighbors = st.slider("UMAP: n_neighbors", 5, 50, 15, 1,
+                                    help="Lower = more local structure; higher = smoother clusters.")
+        with col_b:
+            min_dist = st.slider("UMAP: min_dist", 0.01, 0.50, 0.10, 0.01,
+                                 help="Lower = tighter clusters; higher = more spread out.")
 
-        fig_map = px.scatter(
-            df_map, x="x", y="y", color="Cluster",
-            hover_name="Title",
-            hover_data={"x": False, "y": False, "_hover": True, "Cluster": True},
-            title="UMAP: hover to inspect posts", opacity=0.85
-        )
-        fig_map.update_traces(hovertemplate="%{customdata[0]}")
-        fig_map.update_traces(customdata=df_map[["_hover"]].to_numpy())
-        fig_map.update_layout(legend_title_text="Cluster", template="plotly_white")
-        st.plotly_chart(fig_map, use_container_width=True)
+        if st.button("Generate 2D Map"):
+            with st.spinner("Computing UMAP projection..."):
+                # Robust: if embeddings are missing for any reason, recompute now
+                emb = st.session_state.get("embeddings")
+                if emb is None:
+                    emb = embed_df_texts(dfc)
+                    st.session_state["embeddings"] = emb
+
+                coords = compute_umap(emb, n_neighbors=n_neighbors, min_dist=min_dist)
+                df_map = attach_coords(dfc, coords)
+                df_map["_hover"] = build_hover_html(df_map)
+
+            fig_map = px.scatter(
+                df_map, x="x", y="y", color="Cluster",
+                hover_name="Title",
+                hover_data={"x": False, "y": False, "_hover": True, "Cluster": True},
+                title="UMAP: hover to inspect posts", opacity=0.85
+            )
+            fig_map.update_traces(hovertemplate="%{customdata[0]}")
+            fig_map.update_traces(customdata=df_map[["_hover"]].to_numpy())
+            fig_map.update_layout(legend_title_text="Cluster", template="plotly_white")
+            st.plotly_chart(fig_map, use_container_width=True)  # OK to keep; see note in logs
+
 
 # ---------------------------
 # KWIC: keyword-in-context
