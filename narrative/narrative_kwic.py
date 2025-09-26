@@ -7,7 +7,7 @@ import pandas as pd
 from collections import Counter
 
 # Reuse normalization & stopwords from your TF-IDF module
-from src.narrative_terms import ensure_text_column, build_stopwords
+from narrative.narrative_terms import ensure_text_column, build_stopwords
 
 def kwic_search(
     df: pd.DataFrame,
