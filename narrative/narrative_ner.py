@@ -5,7 +5,7 @@ import pandas as pd
 from typing import Iterable, Tuple
 import spacy
 
-from src.narrative_terms import ensure_text_column
+from narrative.narrative_terms import ensure_text_column
 
 def load_spacy(model: str = "en_core_web_sm") -> spacy.Language:
     """Load spaCy model; download if missing when run in a notebook/script."""
