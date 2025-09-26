@@ -13,13 +13,13 @@ import pandas as pd
 import plotly.express as px
 
 # --- Import reusable modules you added under src/ ---
-from src.narrative_io import normalize_to_canonical
-from src.narrative_embed import load_sbert, concat_title_snippet, embed_texts
-from src.narrative_cluster import run_kmeans, attach_clusters, cluster_counts
-from src.narrative_terms import ensure_text_column, cluster_terms_dataframe
-from src.narrative_map import compute_umap, attach_coords, build_hover_html
-from src.narrative_kwic import kwic_search, kwic_counts_by_cluster, kwic_cooccurrence
-from src.narrative_sentiment import add_vader_sentiment, sentiment_by_cluster
+from narrative.narrative_io import normalize_to_canonical
+from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
+from narrative.narrative_cluster import run_kmeans, attach_clusters, cluster_counts
+from narrative.narrative_terms import ensure_text_column, cluster_terms_dataframe
+from narrative.narrative_map import compute_umap, attach_coords, build_hover_html
+from narrative.narrative_kwic import kwic_search, kwic_counts_by_cluster, kwic_cooccurrence
+from narrative.narrative_sentiment import add_vader_sentiment, sentiment_by_cluster
 
 # ---------------------------
 # Page setup
