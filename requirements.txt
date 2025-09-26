@@ -6,3 +6,4 @@ seaborn
 tqdm
 plotly
 umap-learn
+spacy
