@@ -105,38 +105,54 @@ if run_btn:
         st.session_state["embeddings"] = embeddings
     st.success("Clustering complete.")
 
-if "Cluster" not in st.session_state["df"].columns:
-    st.warning("Run clustering from the sidebar to continue.")
-    st.stop()
-
 dfc = st.session_state["df"]
 embeddings = st.session_state.get("embeddings", None)
 
 # ---------------------------
 # Results: cluster counts + top terms
 # ---------------------------
-st.subheader("Cluster sizes")
-counts = cluster_counts(dfc)
-left, right = st.columns([1,2])
-with left:
-    st.dataframe(counts, use_container_width=True)
-with right:
-    fig = px.bar(counts, x="Cluster", y="Count", title="Posts per Cluster")
-    st.plotly_chart(fig, use_container_width=True)
+st.subheader("Cluster results")
 
-st.subheader("Top terms per cluster (TF-IDF)")
-df_norm = ensure_text_column(dfc)  # builds _text_norm if missing
-terms_df = cluster_terms_dataframe(df_norm, n_terms=12)
-st.dataframe(terms_df, use_container_width=True)
+# Local guards so this section doesn't stop the whole app
+if "df" not in st.session_state:
+    st.info("Load data first.")
+else:
+    dfc = st.session_state["df"]
 
-# Download buttons (cluster counts / top terms)
-cc_csv = counts.to_csv(index=False).encode("utf-8")
-tt_csv = terms_df.to_csv(index=False).encode("utf-8")
-col_dl1, col_dl2 = st.columns(2)
-with col_dl1:
-    st.download_button("Download cluster counts (CSV)", cc_csv, "cluster_counts.csv", "text/csv")
-with col_dl2:
-    st.download_button("Download top terms (CSV)", tt_csv, "cluster_top_terms.csv", "text/csv")
+    if "Cluster" not in dfc.columns:
+        st.info("Run clustering in the sidebar to see cluster results.")
+    else:
+        # Cluster sizes table + bar chart
+        counts = cluster_counts(dfc)
+
+        left, right = st.columns([1, 2])
+        with left:
+            st.dataframe(counts, use_container_width=True)
+
+        with right:
+            fig = px.bar(counts, x="Cluster", y="Count", title="Posts per Cluster")
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Top terms per cluster (TF-IDF)
+        st.subheader("Top terms per cluster (TF-IDF)")
+        df_norm = ensure_text_column(dfc)  # builds _text_norm if missing
+        terms_df = cluster_terms_dataframe(df_norm, n_terms=12)
+        st.dataframe(terms_df, use_container_width=True)
+
+        # Download buttons (cluster counts / top terms)
+        cc_csv = counts.to_csv(index=False).encode("utf-8")
+        tt_csv = terms_df.to_csv(index=False).encode("utf-8")
+        col_dl1, col_dl2 = st.columns(2)
+        with col_dl1:
+            st.download_button(
+                "Download cluster counts (CSV)",
+                cc_csv, "cluster_counts.csv", "text/csv"
+            )
+        with col_dl2:
+            st.download_button(
+                "Download top terms (CSV)",
+                tt_csv, "cluster_top_terms.csv", "text/csv"
+            )
 
 # ---------------------------
 # 2D Semantic Map (UMAP)
@@ -243,16 +259,21 @@ if st.button("Run KWIC") and kw_pattern.strip():
 # Sentiment (VADER)
 # ---------------------------
 st.subheader("Sentiment (VADER)")
-if st.button("Compute sentiment"):
-    with st.spinner("Scoring sentiment..."):
-        df_sent = add_vader_sentiment(dfc)         # adds df["Sentiment"]
-        st.session_state["df"] = df_sent           # keep the new column
-        dfc = df_sent
-
-    st.success("Sentiment computed.")
-    # Summary by cluster
-    sent_tbl = sentiment_by_cluster(dfc)
-    st.dataframe(sent_tbl, use_container_width=True)
+if "df" not in st.session_state:
+    st.info("Load data first.")
+else:
+    dfc = st.session_state["df"]
+    if "Cluster" not in dfc.columns:
+        st.info("Run clustering first to see per-cluster sentiment.")
+    else:
+        if st.button("Compute sentiment"):
+            with st.spinner("Scoring sentiment..."):
+                df_sent = add_vader_sentiment(dfc)  # adds df["Sentiment"]
+                st.session_state["df"] = df_sent
+                dfc = df_sent
+            st.success("Sentiment computed.")
+            sent_tbl = sentiment_by_cluster(dfc)
+            st.dataframe(sent_tbl, use_container_width=True)
 
     # Download
     sent_csv = sent_tbl.to_csv(index=False).encode("utf-8")
