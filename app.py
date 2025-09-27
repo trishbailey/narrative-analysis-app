@@ -38,7 +38,7 @@ st.markdown("""
     }
     h1, h2, h3 {
         font-family: 'Roboto', sans-serif;
-        color: #1a3c6d;
+        color: #ffffff !important; /* White text for button */
     }
     .stButton>button {
         background-color: #1a3c6d;
