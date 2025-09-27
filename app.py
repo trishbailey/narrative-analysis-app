@@ -29,11 +29,11 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .stSidebar {
-        background-color: #2e3b4e; /* Soft navy sidebar */
+        background-color: #6b7280; /* Cool gray sidebar, lighter for readability */
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
-    .stSidebar h2, .stSidebar label, .stSidebar .stCheckbox label, .stSidebar .stButton>button {
+    .stSidebar, .stSidebar h2, .stSidebar label, .stSidebar .stCheckbox label, .stSidebar .stButton>button, .stSidebar .stFileUploader label {
         color: #ffffff !important; /* White text for sidebar contrast */
     }
     h1, h2, h3 {
