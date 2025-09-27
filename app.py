@@ -228,6 +228,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     output = response.choices[0].message.content.strip()
                     # Parse JSON-like output (simple split for demo; use json.loads in production)
                     results = eval(output)  # Use json.loads in production for safety
+                    # Ensure length matches input
+                    if len(results) < len(texts):
+                        results.extend([[0.0, "neutral"]] * (len(texts) - len(results)))
                     return [r[0] for r in results], [r[1] for r in results]
                 except Exception as e:
                     st.warning(f"Toxicity batch error: {e}")
@@ -244,6 +247,13 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 scores.extend(batch_scores)
                 categories.extend(batch_categories)
                 st.progress(i / len(texts))  # Progress bar
+
+            # Validate length and pad if necessary
+            if len(scores) != len(dfc):
+                padding = [0.0] * (len(dfc) - len(scores))
+                scores.extend(padding)
+                categories.extend(["neutral"] * len(padding))
+                st.warning(f"Padded toxicity scores to match DataFrame length: {len(dfc)} rows.")
 
             dfc["Toxicity_Score"] = scores
             dfc["Toxicity_Category"] = categories
