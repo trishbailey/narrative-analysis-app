@@ -11,7 +11,6 @@ from collections import Counter
 import openai
 import os
 import io
-from streamlit_confetti import run_confetti
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto
@@ -442,7 +441,6 @@ if st.button("Run clustering"):
         st.session_state["narratives"] = narratives
         st.session_state["narratives_generated"] = True
     st.success("Clustering and narrative generation complete.")
-    run_confetti()  # Trigger confetti burst
 
 # --- Custom Color Palette ---
 COLOR_PALETTE = [
