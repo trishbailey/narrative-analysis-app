@@ -10,6 +10,7 @@ from collections import Counter
 import openai
 import os
 import json
+import re
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto, normalize_to_canonical
@@ -207,21 +208,50 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         with st.spinner("Scoring toxicity with Grok..."):
             def compute_grok_toxicity_batch(texts):
                 """Batch process texts for toxicity."""
-                prompt = "Analyze each text for toxicity (hate speech, violent language, inflammatory rhetoric) on a scale of 0 (none) to 1 (high). Output a JSON list of [score, category] pairs, e.g., [[0.7, 'hate'], [0.2, 'neutral']]. Consider context and sarcasm."
+                prompt = (
+                    "Analyze each text for toxicity (hate speech, violent language, inflammatory rhetoric) on a scale of 0 (none) to 1 (high). "
+                    "Return a JSON-formatted list of [score, category] pairs, e.g., [[0.7, 'hate'], [0.2, 'neutral']]. "
+                    "Each text must have one pair. Categories: 'hate', 'violent', 'inflammatory', 'neutral'. "
+                    "Ensure the output is valid JSON. Consider context and sarcasm.\n\n"
+                    f"Texts: {json.dumps(texts)}"
+                )
                 try:
                     response = client.chat.completions.create(
                         model="grok-4-fast-reasoning",
-                        messages=[{"role": "user", "content": prompt + f"\n\nTexts: {texts}"}],
+                        messages=[{"role": "user", "content": prompt}],
                         max_tokens=500,
                         temperature=0.1
                     )
                     output = response.choices[0].message.content.strip()
-                    # Parse JSON safely
+                    # Debug: Log raw response (remove in production)
+                    # st.write(f"Raw Grok response: {output}")
+                    # Try parsing as JSON
                     try:
                         results = json.loads(output)
+                        # Validate structure: list of [float, str] pairs
+                        if not isinstance(results, list) or not all(
+                            isinstance(r, list) and len(r) == 2 and isinstance(r[0], (int, float)) and isinstance(r[1], str)
+                            for r in results
+                        ):
+                            st.warning("Invalid response structure. Using default values.")
+                            results = [[0.0, "neutral"]] * len(texts)
                     except json.JSONDecodeError:
-                        st.warning(f"Failed to parse Grok response as JSON. Using default values.")
-                        results = [[0.0, "neutral"]] * len(texts)
+                        # Fallback: Attempt to extract scores and categories from non-JSON response
+                        st.warning("Failed to parse Grok response as JSON. Attempting fallback parsing.")
+                        results = []
+                        # Look for patterns like [0.7, "hate"] or numbers and categories
+                        pattern = r'\[(\d*\.\d+),\s*["\'](\w+)["\']\]'
+                        matches = re.findall(pattern, output)
+                        for score, category in matches:
+                            try:
+                                score = float(score)
+                                if category not in ['hate', 'violent', 'inflammatory', 'neutral']:
+                                    category = 'neutral'
+                                results.append([score, category])
+                            except ValueError:
+                                results.append([0.0, "neutral"])
+                        # Fill remaining with defaults if needed
+                        results.extend([[0.0, "neutral"]] * (len(texts) - len(results)))
                     # Ensure length matches input
                     if len(results) < len(texts):
                         results.extend([[0.0, "neutral"]] * (len(texts) - len(results)))
@@ -242,7 +272,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 scores = []
                 categories = []
                 texts = (dfc_filtered["Snippet"] + " " + dfc_filtered["Title"]).tolist()
-                # Debug: Print lengths for diagnostics (can be removed in production)
+                # Debug: Print lengths for diagnostics (remove in production)
                 # st.write(f"Processing {len(texts)} valid texts for toxicity.")
                 for i in range(0, len(texts), batch_size):
                     batch_texts = texts[i:i + batch_size]
@@ -255,7 +285,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 category_dict = dict(zip(dfc_filtered.index, categories))
                 dfc["Toxicity_Score"] = dfc.index.map(lambda x: score_dict.get(x, 0.0))
                 dfc["Toxicity_Category"] = dfc.index.map(lambda x: category_dict.get(x, "neutral"))
-                # Debug: Verify lengths
+                # Debug: Verify lengths (remove in production)
                 # st.write(f"Length of scores: {len(scores)}, Length of filtered DF: {len(dfc_filtered)}, Length of original DF: {len(dfc)}")
                 if len(scores) != len(dfc_filtered):
                     st.warning(f"Length mismatch in toxicity scores: {len(scores)} scores vs {len(dfc_filtered)} rows. Padded with defaults.")
