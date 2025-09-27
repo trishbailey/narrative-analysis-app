@@ -309,3 +309,89 @@ else:
         else:
             st.caption("Click **Compute sentiment** to score and summarize by cluster.")
 
+# ---------------------------
+# Timeline (counts or % by time bin)
+# ---------------------------
+import pandas as pd
+import plotly.express as px
+
+st.subheader("Timeline")
+
+# Local guards
+if "df" not in st.session_state:
+    st.info("Load data first.")
+else:
+    dfc = st.session_state["df"]
+
+    if "Date" not in dfc.columns or dfc["Date"].isna().all():
+        st.info("No usable dates found. Ensure your CSV has a Date column (parseable).")
+    elif "Cluster" not in dfc.columns:
+        st.info("Run clustering in the sidebar to enable the timeline.")
+    else:
+        # Controls
+        col1, col2, col3 = st.columns([1,1,1])
+        with col1:
+            bin_choice = st.selectbox("Time bin", ["Weekly", "Daily", "Monthly"], index=0)
+        with col2:
+            normalize_pct = st.checkbox("Normalize to % per bin", value=True,
+                                        help="Shows each cluster as a percent of total in that time bin.")
+        with col3:
+            smooth_window = st.number_input("Rolling window (bins)", min_value=1, max_value=12, value=1,
+                                            help="Applies a rolling average over this many bins. 1 = no smoothing.")
+
+        # Optional cluster filter
+        clusters_available = sorted(dfc["Cluster"].unique().tolist())
+        chosen = st.multiselect("Clusters to include", clusters_available, default=clusters_available)
+
+        # Build time bin
+        df_time = dfc.copy()
+        df_time["Date"] = pd.to_datetime(df_time["Date"], errors="coerce")
+        df_time = df_time.dropna(subset=["Date"])
+        if not chosen:
+            st.warning("No clusters selected.")
+            st.stop()
+        df_time = df_time[df_time["Cluster"].isin(chosen)]
+
+        if bin_choice == "Weekly":
+            df_time["Bin"] = df_time["Date"].dt.to_period("W").apply(lambda r: r.start_time)
+        elif bin_choice == "Daily":
+            df_time["Bin"] = df_time["Date"].dt.floor("D")
+        else:  # Monthly
+            df_time["Bin"] = df_time["Date"].dt.to_period("M").dt.to_timestamp()
+
+        # Counts per bin+cluster
+        timeline = (df_time.groupby(["Bin","Cluster"]).size()
+                              .reset_index(name="Count")
+                              .sort_values(["Bin","Cluster"]))
+
+        # Normalize to % per bin (optional)
+        if normalize_pct:
+            totals = timeline.groupby("Bin")["Count"].transform("sum").replace(0, pd.NA)
+            timeline["Value"] = (timeline["Count"] / totals) * 100
+            y_label = "Percent of bin (%)"
+        else:
+            timeline["Value"] = timeline["Count"].astype(float)
+            y_label = "Posts"
+
+        # Rolling smoothing per cluster (optional)
+        if smooth_window > 1:
+            timeline = (timeline.sort_values(["Cluster","Bin"])
+                                 .groupby("Cluster", group_keys=False)
+                                 .apply(lambda d: d.assign(
+                                     Value=d["Value"].rolling(smooth_window, min_periods=1).mean()
+                                 )))
+
+        # Plot
+        if timeline.empty:
+            st.info("No data after filtering. Try different clusters or bin size.")
+        else:
+            fig_t = px.line(timeline, x="Bin", y="Value", color="Cluster",
+                            title=f"Timeline — {bin_choice} ({'%' if normalize_pct else 'counts'})",
+                            markers=True)
+            fig_t.update_layout(yaxis_title=y_label, xaxis_title="Time", legend_title_text="Cluster",
+                                template="plotly_white")
+            st.plotly_chart(fig_t, use_container_width=True)
+
+            # Download
+            dl_csv = timeline.to_csv(index=False).encode("utf-8")
+            st.download_button("Download timeline data (CSV)", dl_csv, "timeline.csv", "text/csv")
