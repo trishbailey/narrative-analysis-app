@@ -4,7 +4,7 @@
 # - Embeddings (SBERT, cached)
 # - KMeans clustering with narrative generation (one click, main interface)
 # - Narrative volumes (bar chart with short 2-4 word labels, horizontal)
-# - Sentiment by narrative (stacked bars with short 2-4 word labels, Grok-based)
+# - Sentiment by narrative (stacked bars showing % positive/neutral/negative with short labels)
 # - Timeline of narratives over time (sentiment trend with short labels)
 import streamlit as st
 import pandas as pd
@@ -22,7 +22,7 @@ import os
 from narrative.narrative_io import read_csv_auto, normalize_to_canonical
 from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
 from narrative.narrative_cluster import run_kmeans, attach_clusters
-from narrative.narrative_sentiment import add_vader_sentiment  # Kept for reference, though replaced
+from narrative.narrative_sentiment import add_vader_sentiment
 
 # --- Page setup ---
 st.set_page_config(page_title="Narrative Analysis", layout="wide")
@@ -138,9 +138,11 @@ if df is not None and not df.empty:
         st.success(f"Loaded {len(st.session_state['df'])} rows (using cached state).")
         st.dataframe(st.session_state["df"].head(5))  # Minimal preview for debugging
 else:
-    if "df" not in st.session_state:
+    if "df" in st.session_state:
+        st.info("Run clustering to generate narratives.")
+    else:
         st.info("Upload a CSV/TSV or enable demo to proceed. Required: Title, Snippet. Optional: Date, URL.")
-        st.stop()
+    st.stop()
 
 # --- Embeddings ---
 @st.cache_resource
@@ -215,26 +217,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     # Sentiment by Narrative (stacked % positive/neutral/negative)
     st.subheader("Sentiment by Narrative")
     if st.button("Compute sentiment"):
-        with st.spinner("Scoring sentiment with Grok..."):
-            def compute_grok_sentiment(text):
-                prompt = f"Analyze the sentiment of this text on a scale of -1 (very negative) to 1 (very positive), considering context and sarcasm. Output only the score as a float (e.g., 0.7)."
-                try:
-                    response = client.chat.completions.create(
-                        model="grok-4-fast-reasoning",
-                        messages=[{"role": "user", "content": prompt + f"\n\nText: {text[:500]}"}],
-                        max_tokens=10,
-                        temperature=0.1
-                    )
-                    score = float(response.choices[0].message.content.strip())
-                    return score
-                except Exception as e:
-                    st.warning(f"Sentiment error for text: {e}")
-                    return 0.0
-
-            # Apply sentiment analysis to each row, combining Title and Snippet
-            dfc["Sentiment"] = dfc.apply(lambda row: compute_grok_sentiment(row["Snippet"] + " " + str(row["Title"])), axis=1)
+        with st.spinner("Scoring sentiment..."):
+            dfc = add_vader_sentiment(dfc)  # Adds Sentiment column (-1 to 1)
             st.session_state["df"] = dfc
-        st.success("Sentiment computed with Grok.")
     if "Sentiment" in dfc.columns:
         sentiment_cuts = pd.cut(dfc["Sentiment"], bins=[-1.0, -0.1, 0.1, 1.0], labels=["Negative", "Neutral", "Positive"])
         sentiment_data = dfc.groupby(["Cluster", sentiment_cuts]).size().reset_index(name="Count")
