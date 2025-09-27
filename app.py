@@ -197,7 +197,7 @@ else:
     if "df" in st.session_state:
         st.info("Run clustering to generate narratives.")
     else:
-        st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet, Author. Optional: Date, URL, Likes, Reposts, Replies.")
+        st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet. Optional: Date, URL.")
     st.stop()
 
 # --- Embeddings ---
@@ -215,7 +215,7 @@ def embed_df_texts(df_in: pd.DataFrame):
 # --- Clustering with Narrative Generation ---
 st.header("Run Clusters")
 st.markdown("Use the sliding scale to set the number of narrative categories for your data. You can always adjust it to capture the main narratives more exactly.")
-k = st.slider("Number of clusters", 2, 12, 6, 1)
+k = st.slider("Number of clusters (KMeans)", 2, 12, 6, 1)
 if st.button("Run clustering"):
     with st.spinner("Hold on, we are generating narratives for you!"):
         embeddings = embed_df_texts(st.session_state["df"])
@@ -429,19 +429,19 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             st.warning("Insufficient time span in data for trends. All dates are the same or invalid.")
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
-
     # Top 10 Posters Analysis
     st.subheader("Top Posters Analysis")
-    if 'author' in dfc.columns:
+    author_col = next((col for col in ["author", "Influencer"] if col in dfc.columns), None)
+    if author_col:
         # Compute top 10 by volume
-        volume_by_author = dfc.groupby('author').size().nlargest(10).reset_index(name='Volume')
+        volume_by_author = dfc.groupby(author_col).size().nlargest(10).reset_index(name='Volume')
         # Compute top 10 by engagement (sum of likes, reposts, replies)
-        engagement_cols = [col for col in ['likes', 'reposts', 'replies'] if col in dfc.columns]
+        engagement_cols = [col for col in ['likes', 'reposts', 'replies', 'Likes', 'Reposts', 'Retweets', 'Comments', 'Shares', 'Reactions'] if col in dfc.columns]
         if engagement_cols:
-            engagement_by_author = dfc.groupby('author')[engagement_cols].sum().sum(axis=1).nlargest(10).reset_index(name='Engagement')
+            engagement_by_author = dfc.groupby(author_col)[engagement_cols].sum().sum(axis=1).nlargest(10).reset_index(name='Engagement')
         else:
-            engagement_by_author = pd.DataFrame({'author': [], 'Engagement': []})
-            st.warning("No engagement columns (likes, reposts, replies) found in dataset. Engagement chart skipped.")
+            engagement_by_author = pd.DataFrame({author_col: [], 'Engagement': []})
+            st.warning("No engagement columns (likes, reposts, replies, Likes, Reposts, Retweets, Comments, Shares, Reactions) found in dataset. Engagement chart skipped.")
         
         # Create two-column layout
         col1, col2 = st.columns(2)
@@ -451,9 +451,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             fig_volume_authors = px.bar(
                 volume_by_author,
                 x='Volume',
-                y='author',
+                y=author_col,
                 title="Top 10 Posters by Volume",
-                color='author',
+                color=author_col,
                 color_discrete_sequence=COLOR_PALETTE,
                 orientation='h'
             )
@@ -466,7 +466,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
                 title=dict(text="Top 10 Posters by Volume", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
                 xaxis=dict(title="Post Count", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="rgba(0,0,0,0.1)"),
-                yaxis=dict(title="Author", title_font=dict(size=14), tickfont=dict(size=12)),
+                yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=12)),
                 plot_bgcolor="rgba(247,249,252,0.8)",
                 paper_bgcolor="rgba(255,255,255,0)",
                 showlegend=False,
@@ -475,7 +475,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
             )
             if not volume_by_author.empty:
-                max_volume_author = volume_by_author.iloc[0]['author']
+                max_volume_author = volume_by_author.iloc[0][author_col]
                 max_volume_value = volume_by_author.iloc[0]['Volume']
                 fig_volume_authors.add_annotation(
                     x=max_volume_value,
@@ -495,9 +495,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 fig_engagement_authors = px.bar(
                     engagement_by_author,
                     x='Engagement',
-                    y='author',
+                    y=author_col,
                     title="Top 10 Posters by Engagement",
-                    color='author',
+                    color=author_col,
                     color_discrete_sequence=COLOR_PALETTE,
                     orientation='h'
                 )
@@ -510,7 +510,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
                     title=dict(text="Top 10 Posters by Engagement", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
                     xaxis=dict(title="Engagement (Likes + Reposts + Replies)", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="rgba(0,0,0,0.1)"),
-                    yaxis=dict(title="Author", title_font=dict(size=14), tickfont=dict(size=12)),
+                    yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=12)),
                     plot_bgcolor="rgba(247,249,252,0.8)",
                     paper_bgcolor="rgba(255,255,255,0)",
                     showlegend=False,
@@ -518,7 +518,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     hovermode="closest",
                     hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
                 )
-                max_engagement_author = engagement_by_author.iloc[0]['author']
+                max_engagement_author = engagement_by_author.iloc[0][author_col]
                 max_engagement_value = engagement_by_author.iloc[0]['Engagement']
                 fig_engagement_authors.add_annotation(
                     x=max_engagement_value,
@@ -531,14 +531,16 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     font=dict(size=12, color="#1a3c6d")
                 )
                 st.plotly_chart(fig_engagement_authors, use_container_width=True)
+    else:
+        st.warning("No 'author' or 'Influencer' column found in dataset. Top posters analysis skipped.")
 
     # Author-Theme Correlation
     st.subheader("Author-Theme Correlation")
-    if 'author' in dfc.columns:
+    if author_col:
         # Compute correlation (post counts by author and cluster)
-        correlation_data = dfc.groupby(['author', 'Cluster']).size().unstack(fill_value=0)
-        # Select top 10 authors by volume (or engagement, configurable)
-        top_authors = volume_by_author['author'].tolist()
+        correlation_data = dfc.groupby([author_col, 'Cluster']).size().unstack(fill_value=0)
+        # Select top 10 authors by volume
+        top_authors = volume_by_author[author_col].tolist()
         correlation_data = correlation_data.loc[correlation_data.index.isin(top_authors)]
         if not correlation_data.empty:
             # Map cluster IDs to short labels
@@ -546,16 +548,16 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             # Create heatmap
             fig_correlation = px.imshow(
                 correlation_data,
-                labels=dict(x="Narrative", y="Author", color="Post Count"),
-                title="Author-Narrative Correlation (Post Counts)",
+                labels=dict(x="Narrative", y="Poster", color="Post Count"),
+                title="Poster-Narrative Correlation (Post Counts)",
                 color_continuous_scale="RdBu",
                 aspect="auto"
             )
             fig_correlation.update_layout(
                 font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-                title=dict(text="Author-Narrative Correlation (Post Counts)", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
+                title=dict(text="Poster-Narrative Correlation (Post Counts)", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
                 xaxis=dict(title="Narrative", title_font=dict(size=14), tickfont=dict(size=12), tickangle=45),
-                yaxis=dict(title="Author", title_font=dict(size=14), tickfont=dict(size=12)),
+                yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=12)),
                 plot_bgcolor="rgba(247,249,252,0.8)",
                 paper_bgcolor="rgba(255,255,255,0)",
                 margin=dict(l=50, r=50, t=80, b=50),
@@ -579,13 +581,12 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             )
             st.plotly_chart(fig_correlation, use_container_width=True)
         else:
-            st.warning("No data available for author-theme correlation. Ensure authors and clusters are present.")
+            st.warning("No data available for poster-theme correlation. Ensure posters and clusters are present.")
     else:
-        st.warning("No 'author' column found in dataset. Author-theme correlation skipped.")
+        st.warning("No 'author' or 'Influencer' column found in dataset. Poster-theme correlation skipped.")
 
 else:
     if "df" in st.session_state and not "clustered" in st.session_state:
         st.info("Run clustering to generate narratives.")
     else:
-        st.info("Upload a dataset to proceed. Required: Title, Snippet, Author. Optional: Date, URL, Likes, Reposts, Replies.")
-    st.stop()
+        st.info("Upload a dataset to proceed.")
