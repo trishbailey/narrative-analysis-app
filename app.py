@@ -9,7 +9,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from collections import Counter
 import openai
 import os
-import json
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto, normalize_to_canonical
@@ -201,135 +200,30 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     fig_volumes = px.bar(volume_data, x="Narrative", y="Volume", title="Narrative Volumes")
     fig_volumes.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Volume") # Horizontal labels
     st.plotly_chart(fig_volumes, use_container_width=True)
-    # Toxicity by Narrative (stacked bars with short labels)
-    st.subheader("Toxicity by Narrative")
-    if st.button("Compute toxicity"):
-        with st.spinner("Scoring toxicity with Grok..."):
-            def compute_grok_toxicity_batch(texts):
-                """Batch process texts for toxicity."""
-                prompt = (
-                    "Analyze each text for toxicity (hate speech, violent language, inflammatory rhetoric) on a scale of 0 (none) to 1 (high). "
-                    "Return a JSON-formatted list of [score, category] pairs, e.g., [[0.7, 'hate'], [0.2, 'neutral']]. "
-                    "Each text must have one pair. Categories: 'hate', 'violent', 'inflammatory', 'neutral'. "
-                    "Ensure the output is valid JSON. Consider context and sarcasm.\n\n"
-                    f"Texts: {json.dumps(texts)}"
-                )
-                try:
-                    response = client.chat.completions.create(
-                        model="grok-4-fast-reasoning",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=500,
-                        temperature=0.1
-                    )
-                    output = response.choices[0].message.content.strip()
-                    # Try parsing as JSON
-                    try:
-                        results = json.loads(output)
-                        # Validate structure: list of [float, str] pairs
-                        if not isinstance(results, list) or not all(
-                            isinstance(r, list) and len(r) == 2 and isinstance(r[0], (int, float)) and isinstance(r[1], str)
-                            for r in results
-                        ):
-                            st.warning("Invalid response structure. Using default values.")
-                            results = [[0.0, "neutral"]] * len(texts)
-                    except json.JSONDecodeError:
-                        # Fallback: Attempt to extract scores and categories from non-JSON response
-                        st.warning("Failed to parse Grok response as JSON. Attempting fallback parsing.")
-                        results = []
-                        # Look for patterns like [0.7, "hate"] or numbers and categories
-                        pattern = r'\[(\d*\.\d+),\s*["\'](\w+)["\']\]'
-                        matches = re.findall(pattern, output)
-                        for score, category in matches:
-                            try:
-                                score = float(score)
-                                if category not in ['hate', 'violent', 'inflammatory', 'neutral']:
-                                    category = 'neutral'
-                                results.append([score, category])
-                            except ValueError:
-                                results.append([0.0, "neutral"])
-                        # Fill remaining with defaults if needed
-                        results.extend([[0.0, "neutral"]] * (len(texts) - len(results)))
-                    # Ensure length matches input
-                    if len(results) < len(texts):
-                        results.extend([[0.0, "neutral"]] * (len(texts) - len(results)))
-                    elif len(results) > len(texts):
-                        results = results[:len(texts)]
-                    return [r[0] for r in results], [r[1] for r in results]
-                except Exception as e:
-                    st.warning(f"Toxicity batch error: {e}. Using default values.")
-                    return [0.0] * len(texts), ["neutral"] * len(texts)
-            # Preprocess: Filter out invalid texts (NaN or non-string)
-            dfc_filtered = dfc.dropna(subset=["Title", "Snippet"])
-            dfc_filtered = dfc_filtered[dfc_filtered["Title"].apply(lambda x: isinstance(x, str)) & dfc_filtered["Snippet"].apply(lambda x: isinstance(x, str))]
-            if dfc_filtered.empty:
-                st.error("No valid texts available for toxicity analysis.")
-            else:
-                # Batch process (50 rows per batch to manage tokens)
-                batch_size = 50
-                scores = []
-                categories = []
-                texts = (dfc_filtered["Snippet"] + " " + dfc_filtered["Title"]).tolist()
-                for i in range(0, len(texts), batch_size):
-                    batch_texts = texts[i:i + batch_size]
-                    batch_scores, batch_categories = compute_grok_toxicity_batch(batch_texts)
-                    scores.extend(batch_scores)
-                    categories.extend(batch_categories)
-                    # Ensure progress value is in [0.0, 1.0]
-                    progress = min((i + min(batch_size, len(texts))) / len(texts), 1.0) if len(texts) > 0 else 0.0
-                    st.progress(progress) # Progress bar
-                # Map scores back to original DataFrame
-                score_dict = dict(zip(dfc_filtered.index, scores))
-                category_dict = dict(zip(dfc_filtered.index, categories))
-                dfc["Toxicity_Score"] = dfc.index.map(lambda x: score_dict.get(x, 0.0))
-                dfc["Toxicity_Category"] = dfc.index.map(lambda x: category_dict.get(x, "neutral"))
-                if len(scores) != len(dfc_filtered):
-                    st.warning(f"Length mismatch in toxicity scores: {len(scores)} scores vs {len(dfc_filtered)} rows. Padded with defaults.")
-                st.session_state["df"] = dfc
-        st.success("Toxicity computed with Grok.")
-    if "Toxicity_Score" in dfc.columns:
-        toxicity_data = dfc.groupby("Cluster")["Toxicity_Score"].mean().reset_index()
-        toxicity_data["Narrative"] = toxicity_data["Cluster"].map(short_labels_map)
-        toxicity_cuts = pd.cut(toxicity_data["Toxicity_Score"], bins=[0.0, 0.3, 0.7, 1.0], labels=["Low", "Medium", "High"])
-        fig_toxicity = px.bar(
-            toxicity_data,
-            x="Narrative",
-            y="Toxicity_Score",
-            color=toxicity_cuts,
-            title="Average Toxicity by Narrative",
-            color_discrete_map={"Low": "#2ca02c", "Medium": "#9e9e9e", "High": "#d62728"},
-            labels={"Toxicity_Score": "Average Toxicity Score (0-1)"}
-        )
-        fig_toxicity.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Toxicity Score") # Horizontal labels
-        st.plotly_chart(fig_toxicity, use_container_width=True)
-    else:
-        st.caption("Click **Compute toxicity** to score and visualize.")
-    # Timeline of Narratives (Toxicity Trend)
+    # Timeline of Narratives (Volume Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
-    if date_column and dfc[date_column].notna().any() and "Toxicity_Score" in dfc.columns:
+    if date_column and dfc[date_column].notna().any():
         dfc[date_column] = pd.to_datetime(dfc[date_column], errors="coerce")
         try:
-            timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq="W")])["Toxicity_Score"].mean().reset_index()
+            timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq="W")]).size().reset_index(name="Volume")
             timeline_data["Narrative"] = timeline_data["Cluster"].map(short_labels_map)
-            st.subheader("Toxicity Trend Over Time")
+            st.subheader("Narrative Trends Over Time")
             fig_timeline = px.line(
                 timeline_data,
                 x=date_column,
-                y="Toxicity_Score",
+                y="Volume",
                 color="Narrative",
-                title="Weekly Average Toxicity by Narrative",
-                labels={"Toxicity_Score": "Average Toxicity Score", date_column: "Week"},
+                title="Weekly Narrative Volume Trends",
+                labels={"Volume": "Post Count", date_column: "Week"},
                 markers=True
             )
             fig_timeline.update_yaxes(
-                range=[0, 1],
-                tickvals=[0, 0.3, 0.7, 1],
-                ticktext=["None", "Low", "Medium", "High"]
+                title="Number of Posts",
+                tickformat="d"  # Ensure integer ticks for counts
             )
             st.plotly_chart(fig_timeline, use_container_width=True)
         except KeyError:
-            st.warning(f"No valid {date_column} data or Toxicity column for timeline. Ensure dates and toxicity are computed.")
-    elif not "Toxicity_Score" in dfc.columns:
-        st.warning("Compute toxicity first to enable the timeline.")
+            st.warning(f"No valid {date_column} data for timeline. Ensure dates are properly formatted.")
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
 else:
