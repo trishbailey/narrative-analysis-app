@@ -207,8 +207,18 @@ if st.button("Run clustering"):
 
 # --- Custom Color Palette ---
 COLOR_PALETTE = [
-    '#1a3c6d', '#2e5aa8', '#4a90e2', '#7ab2ff', '#a3c6ff',
-    '#6b2d5c', '#9b59b6', '#c39bd3', '#d7bde2', '#e8d8f0'
+    '#1a3c6d',  # Deep Blue
+    '#d32f2f',  # Red
+    '#2e7d32',  # Green
+    '#f57c00',  # Orange
+    '#6a1b9a',  # Purple
+    '#0288d1',  # Light Blue
+    '#c2185b',  # Pink
+    '#388e3c',  # Forest Green
+    '#f4a261',  # Peach
+    '#00838f',  # Cyan
+    '#8e24aa',  # Violet
+    '#689f38'   # Lime Green
 ]
 
 # --- Main Display ---
