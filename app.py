@@ -19,7 +19,7 @@ from narrative.narrative_cluster import run_kmeans, attach_clusters
 # --- Page setup ---
 st.set_page_config(page_title="Narrative Analysis", layout="wide")
 
-# Custom CSS for a polished look
+# Custom CSS for a polished look, including slider styling
 st.markdown("""
     <style>
     .main .block-container {
@@ -40,6 +40,45 @@ st.markdown("""
     }
     .stButton>button:hover {
         background-color: #2e5aa8;
+    }
+    /* Slider styling */
+    .stSlider [type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 8px;
+        background: #d3d8e0; /* Track color */
+        border-radius: 5px;
+    }
+    .stSlider [type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        background-color: #1a3c6d; /* Dark blue thumb */
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+    .stSlider [type="range"]::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        background-color: #1a3c6d; /* Dark blue thumb */
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+    .stSlider [type="range"]::-webkit-slider-runnable-track {
+        background: #d3d8e0; /* Track color */
+        height: 8px;
+        border-radius: 5px;
+    }
+    .stSlider [type="range"]::-moz-range-track {
+        background: #d3d8e0; /* Track color */
+        height: 8px;
+        border-radius: 5px;
+    }
+    .stSlider [type="range"]::-webkit-slider-runnable-track {
+        background: linear-gradient(to right, #4a90e2 0%, #4a90e2 var(--thumb-position), #d3d8e0 var(--thumb-position), #d3d8e0 100%);
     }
     </style>
 """, unsafe_allow_html=True)
