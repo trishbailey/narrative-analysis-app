@@ -39,6 +39,7 @@ st.markdown("""
     h1, h2, h3 {
         font-family: 'Roboto', sans-serif;
         color: #ffffff !important; /* White text for button */
+        background-color: #6b7280 !important; /* Gray background for sidebar button */
     }
     .stButton>button {
         background-color: #1a3c6d;
@@ -47,7 +48,7 @@ st.markdown("""
         padding: 0.5rem 1rem;
     }
     .stButton>button:hover {
-        background-color: #2e5aa8;
+        background-color: #4b5563 !important; /* Darker gray on hover for sidebar button */
     }
     /* Slider styling */
     .stSlider [type="range"] {
