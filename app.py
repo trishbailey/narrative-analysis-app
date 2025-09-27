@@ -3,10 +3,10 @@
 # - Upload & normalize CSV (Title/Snippet/Date/URL) with robust encoding handling
 # - Embeddings (SBERT, cached)
 # - KMeans clustering (one click)
-# - Generate fresh narrative summaries and detailed labels per cluster
-# - Narrative volumes (bar chart)
-# - Sentiment by narrative (colored bars)
-# - Timeline of narratives over time (sentiment trend)
+# - Generate fresh narrative summaries with short 2-4 word labels for graphics
+# - Narrative volumes (bar chart with short labels)
+# - Sentiment by narrative (colored bars with short labels)
+# - Timeline of narratives over time (sentiment trend with short labels)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -63,14 +63,14 @@ def central_indexes(mask_idx, k=5):
     order = sims.argsort()[::-1][:min(k, len(sims))]
     return [mask_idx[i] for i in order]
 
-def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str]:
+def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
     combined_text = "\n\n".join(texts)
     prompt = (
         "Create a fresh, original summary of the main gist of these social media posts clustered around a theme. "
         "Do not copy-paste, quote, or repeat any specific tweet content literally. "
         "Identify key actors, events, conflicts, resolutions, and themes in a concise 1-2 sentence summary (under 50 words). "
-        "Suggest a detailed, meaningful label for this narrative (10-20 words). "
-        "Output format: Summary: [your fresh summary] Label: [your detailed label]"
+        "Suggest a detailed, meaningful label for this narrative (10-20 words) and a short 2-4 word label derived from the summary. "
+        "Output format: Summary: [your fresh summary] Detailed Label: [your detailed label] Short Label: [your 2-4 word label]"
         f"Posts:\n{combined_text}"
     )
     try:
@@ -81,11 +81,12 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str]:
             temperature=0.7
         )
         output = response.choices[0].message.content.strip()
-        summary = output.split("Label:")[0].replace("Summary: ", "").strip()
-        label = output.split("Label:")[-1].strip()
-        return summary, label
+        summary = output.split("Detailed Label:")[0].replace("Summary: ", "").strip()
+        detailed_label = output.split("Detailed Label:")[1].split("Short Label:")[0].strip()
+        short_label = output.split("Short Label:")[1].strip()
+        return summary, detailed_label, short_label
     except Exception as e:
-        return f"Error: {e}", f"Narrative {cid}"
+        return f"Error: {e}", f"Narrative {cid}", f"Cluster {cid}"
 
 # --- Section 1: Load & Normalize ---
 st.sidebar.header("Load Data")
@@ -174,8 +175,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
         emb = embed_df_texts(dfc)
         st.session_state["embeddings"] = emb
 
-    # Generate narratives and labels
-    labels_map = {}
+    # Generate narratives, detailed labels, and short labels
+    labels_map = {}  # Detailed labels for display
+    short_labels_map = {}  # 2-4 word labels for graphics
     narratives = {}
     for cid in sorted(dfc["Cluster"].unique()):
         mask_idx = np.where(dfc["Cluster"].values == cid)[0]
@@ -183,8 +185,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
             continue
         top_idx = central_indexes(mask_idx, k=5)
         central_texts = [" ".join([str(dfc.iloc[i].get("Title", "") or ""), first_sentence(dfc.iloc[i].get("Snippet", ""))]).strip() for i in top_idx]
-        summary, label = llm_narrative_summary(central_texts, cid)
-        labels_map[cid] = label
+        summary, detailed_label, short_label = llm_narrative_summary(central_texts, cid)
+        labels_map[cid] = detailed_label
+        short_labels_map[cid] = short_label
         narratives[cid] = summary
 
     # Display Narratives
@@ -195,7 +198,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
     # Bar Chart of Narrative Volumes
     volume_data = dfc["Cluster"].value_counts().reset_index()
     volume_data.columns = ["Cluster", "Volume"]
-    volume_data["Narrative"] = volume_data["Cluster"].map(labels_map)
+    volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
     st.subheader("Narrative Volumes")
     st.bar_chart(volume_data.set_index("Narrative")["Volume"], height=400)
 
@@ -207,7 +210,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
             st.session_state["df"] = dfc
     if "Sentiment" in dfc.columns:
         sentiment_data = dfc.groupby("Cluster")["Sentiment"].mean().reset_index()
-        sentiment_data["Narrative"] = sentiment_data["Cluster"].map(labels_map)
+        sentiment_data["Narrative"] = sentiment_data["Cluster"].map(short_labels_map)
         sentiment_cuts = pd.cut(sentiment_data["Sentiment"], bins=[-1.0, -0.1, 0.1, 1.0], labels=["Negative", "Neutral", "Positive"])
         fig_sentiment = px.bar(
             sentiment_data,
@@ -223,33 +226,33 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
         st.caption("Click **Compute sentiment** to score and visualize.")
 
     # Timeline of Narratives (Sentiment Trend)
-    if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
-        dfc = st.session_state["df"].copy()
-        date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
-        if date_column and dfc[date_column].notna().any():
-            dfc[date_column] = pd.to_datetime(dfc[date_column], errors="coerce")
-            try:
-                timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq="W")])["Sentiment"].mean().reset_index()
-                timeline_data["Narrative"] = timeline_data["Cluster"].map(labels_map)
-                st.subheader("Sentiment Trend Over Time")
-                fig_timeline = px.line(
-                    timeline_data,
-                    x=date_column,
-                    y="Sentiment",
-                    color="Narrative",
-                    title="Weekly Average Sentiment by Narrative",
-                    labels={"Sentiment": "Average Sentiment", date_column: "Week"},
-                    markers=True
-                )
-                fig_timeline.update_yaxes(
-                    range=[-1, 1],
-                    tickvals=[-1, -0.5, 0, 0.5, 1],
-                    ticktext=["Very Negative", "Negative", "Neutral", "Positive", "Very Positive"]
-                )
-                st.plotly_chart(fig_timeline, width="stretch")
-            except KeyError:
-                st.warning(f"No valid {date_column} data or Sentiment column for timeline. Ensure dates and sentiment are computed.")
-        else:
-            st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
+    date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
+    if date_column and dfc[date_column].notna().any() and "Sentiment" in dfc.columns:
+        dfc[date_column] = pd.to_datetime(dfc[date_column], errors="coerce")
+        try:
+            timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq="W")])["Sentiment"].mean().reset_index()
+            timeline_data["Narrative"] = timeline_data["Cluster"].map(short_labels_map)
+            st.subheader("Sentiment Trend Over Time")
+            fig_timeline = px.line(
+                timeline_data,
+                x=date_column,
+                y="Sentiment",
+                color="Narrative",
+                title="Weekly Average Sentiment by Narrative",
+                labels={"Sentiment": "Average Sentiment", date_column: "Week"},
+                markers=True
+            )
+            fig_timeline.update_yaxes(
+                range=[-1, 1],
+                tickvals=[-1, -0.5, 0, 0.5, 1],
+                ticktext=["Very Negative", "Negative", "Neutral", "Positive", "Very Positive"]
+            )
+            st.plotly_chart(fig_timeline, width="stretch")
+        except KeyError:
+            st.warning(f"No valid {date_column} data or Sentiment column for timeline. Ensure dates and sentiment are computed.")
+    elif not "Sentiment" in dfc.columns:
+        st.warning("Compute sentiment first to enable the timeline.")
+    else:
+        st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
 else:
     st.info("Upload a dataset and run clustering to generate narratives.")
