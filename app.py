@@ -20,7 +20,7 @@ import openai
 import os
 
 # --- Reusable modules ---
-from narrative.narrative_io import normalize_to_canonical
+from narrative.narrative_io import read_csv_auto, normalize_to_canonical
 from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
 from narrative.narrative_cluster import run_kmeans, attach_clusters
 from narrative.narrative_sentiment import add_vader_sentiment
@@ -87,7 +87,7 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str]:
     except Exception as e:
         return f"Error: {e}", f"Narrative {cid}"
 
-# --- Section 1: Load & Normalize with Robust Encoding ---
+# --- Section 1: Load & Normalize ---
 st.sidebar.header("Load Data")
 uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8 / UTF-16 / TSV)", type=["csv", "tsv"])
 use_demo = st.sidebar.checkbox("Use tiny demo data", value=False)
@@ -105,21 +105,11 @@ def _df_signature(d: pd.DataFrame):
         sig = (d.shape, tuple(sorted(d.columns)))
     return sig
 
-def read_file_with_encoding(file):
-    encodings = ["utf-8-sig", "utf-16", "utf-16le", "utf-8"]
-    for enc in encodings:
-        try:
-            return pd.read_csv(file, encoding=enc, on_bad_lines="skip")
-        except UnicodeDecodeError:
-            continue
-    st.error("Unable to decode file with supported encodings. Please check the file format.")
-    return None
-
 df = None
 error = None
 try:
     if uploaded is not None:
-        raw = read_file_with_encoding(uploaded)
+        raw = read_csv_auto(uploaded)
         if raw is not None:
             df = normalize_to_canonical(raw)
     elif use_demo:
@@ -142,8 +132,10 @@ if df is not None and not df.empty:
         for k in ["embeddings", "clustered", "assigned_from_baseline", "labels"]:
             st.session_state.pop(k, None)
         st.success(f"Loaded {len(df)} rows (new dataset).")
+        st.dataframe(st.session_state["df"].head(5))  # Minimal preview for debugging
     else:
         st.success(f"Loaded {len(st.session_state['df'])} rows (using cached state).")
+        st.dataframe(st.session_state["df"].head(5))  # Minimal preview for debugging
 else:
     if "df" not in st.session_state:
         st.info("Upload a CSV/TSV or enable demo to proceed. Required: Title, Snippet. Optional: Date, URL.")
