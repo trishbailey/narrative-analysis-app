@@ -4,8 +4,8 @@
 # - Embeddings (SBERT, cached)
 # - KMeans clustering with narrative generation (one click, main interface)
 # - Narrative volumes (bar chart with short 2-4 word labels, horizontal)
-# - Sentiment by narrative (stacked bars showing % positive/neutral/negative with short labels)
-# - Timeline of narratives over time (sentiment trend with short labels)
+# - Toxicity by narrative (stacked bars with short 2-4 word labels, Grok-based)
+# - Timeline of narratives over time (toxicity trend with short labels)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -22,7 +22,6 @@ import os
 from narrative.narrative_io import read_csv_auto, normalize_to_canonical
 from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
 from narrative.narrative_cluster import run_kmeans, attach_clusters
-from narrative.narrative_sentiment import add_vader_sentiment
 
 # --- Page setup ---
 st.set_page_config(page_title="Narrative Analysis", layout="wide")
@@ -214,59 +213,77 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     fig_volumes.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Volume")  # Horizontal labels
     st.plotly_chart(fig_volumes, use_container_width=True)
 
-    # Sentiment by Narrative (stacked % positive/neutral/negative)
-    st.subheader("Sentiment by Narrative")
-    if st.button("Compute sentiment"):
-        with st.spinner("Scoring sentiment..."):
-            dfc = add_vader_sentiment(dfc)  # Adds Sentiment column (-1 to 1)
-            st.session_state["df"] = dfc
-    if "Sentiment" in dfc.columns:
-        sentiment_cuts = pd.cut(dfc["Sentiment"], bins=[-1.0, -0.1, 0.1, 1.0], labels=["Negative", "Neutral", "Positive"])
-        sentiment_data = dfc.groupby(["Cluster", sentiment_cuts]).size().reset_index(name="Count")
-        sentiment_data["Percentage"] = sentiment_data.groupby("Cluster")["Count"].transform(lambda x: x / x.sum() * 100)
-        sentiment_data["Narrative"] = sentiment_data["Cluster"].map(short_labels_map)
-        fig_sentiment = px.bar(
-            sentiment_data,
-            x="Narrative",
-            y="Percentage",
-            color="Sentiment",
-            title="Sentiment Distribution by Narrative (%)",
-            color_discrete_map={"Negative": "#d62728", "Neutral": "#9e9e9e", "Positive": "#2ca02c"},
-            labels={"Percentage": "Percentage (%)"},
-            category_orders={"Sentiment": ["Positive", "Neutral", "Negative"]}
-        )
-        fig_sentiment.update_layout(barmode="stack", bargap=0.1, xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Percentage (%)")  # Horizontal labels
-        st.plotly_chart(fig_sentiment, use_container_width=True)
-    else:
-        st.caption("Click **Compute sentiment** to score and visualize.")
+    # Toxicity by Narrative (stacked bars with short labels)
+    st.subheader("Toxicity by Narrative")
+    if st.button("Compute toxicity"):
+        with st.spinner("Scoring toxicity with Grok..."):
+            def compute_grok_toxicity(text):
+                prompt = f"Analyze this text for toxicity: presence of hate speech, violent language, or inflammatory rhetoric on a scale of 0 (none) to 1 (high). Consider context and sarcasm. Output only the score as a float (e.g., 0.7) and category (hate, violence, neutral)."
+                try:
+                    response = client.chat.completions.create(
+                        model="grok-4-fast-reasoning",
+                        messages=[{"role": "user", "content": prompt + f"\n\nText: {text[:500]}"}],
+                        max_tokens=20,
+                        temperature=0.1
+                    )
+                    output = response.choices[0].message.content.strip()
+                    score = float(output.split()[0])  # First token as score
+                    category = output.split()[-1] if len(output.split()) > 1 else "neutral"
+                    return score, category
+                except Exception as e:
+                    st.warning(f"Toxicity error for text: {e}")
+                    return 0.0, "neutral"
 
-    # Timeline of Narratives (Sentiment Trend)
+            # Apply toxicity analysis to each row
+            dfc["Toxicity_Score"] = dfc.apply(lambda row: compute_grok_toxicity(row["Snippet"] + " " + str(row["Title"]))[0], axis=1)
+            dfc["Toxicity_Category"] = dfc.apply(lambda row: compute_grok_toxicity(row["Snippet"] + " " + str(row["Title"]))[1], axis=1)
+            st.session_state["df"] = dfc
+        st.success("Toxicity computed with Grok.")
+    if "Toxicity_Score" in dfc.columns:
+        toxicity_data = dfc.groupby("Cluster")["Toxicity_Score"].mean().reset_index()
+        toxicity_data["Narrative"] = toxicity_data["Cluster"].map(short_labels_map)
+        toxicity_cuts = pd.cut(toxicity_data["Toxicity_Score"], bins=[0.0, 0.3, 0.7, 1.0], labels=["Low", "Medium", "High"])
+        fig_toxicity = px.bar(
+            toxicity_data,
+            x="Narrative",
+            y="Toxicity_Score",
+            color=toxicity_cuts,
+            title="Average Toxicity by Narrative",
+            color_discrete_map={"Low": "#2ca02c", "Medium": "#9e9e9e", "High": "#d62728"},
+            labels={"Toxicity_Score": "Average Toxicity Score (0-1)"}
+        )
+        fig_toxicity.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Toxicity Score")  # Horizontal labels
+        st.plotly_chart(fig_toxicity, use_container_width=True)
+    else:
+        st.caption("Click **Compute toxicity** to score and visualize.")
+
+    # Timeline of Narratives (Toxicity Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
-    if date_column and dfc[date_column].notna().any() and "Sentiment" in dfc.columns:
+    if date_column and dfc[date_column].notna().any() and "Toxicity_Score" in dfc.columns:
         dfc[date_column] = pd.to_datetime(dfc[date_column], errors="coerce")
         try:
-            timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq="W")])["Sentiment"].mean().reset_index()
+            timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq="W")])["Toxicity_Score"].mean().reset_index()
             timeline_data["Narrative"] = timeline_data["Cluster"].map(short_labels_map)
-            st.subheader("Sentiment Trend Over Time")
+            st.subheader("Toxicity Trend Over Time")
             fig_timeline = px.line(
                 timeline_data,
                 x=date_column,
-                y="Sentiment",
+                y="Toxicity_Score",
                 color="Narrative",
-                title="Weekly Average Sentiment by Narrative",
-                labels={"Sentiment": "Average Sentiment", date_column: "Week"},
+                title="Weekly Average Toxicity by Narrative",
+                labels={"Toxicity_Score": "Average Toxicity Score", date_column: "Week"},
                 markers=True
             )
             fig_timeline.update_yaxes(
-                range=[-1, 1],
-                tickvals=[-1, -0.5, 0, 0.5, 1],
-                ticktext=["Very Negative", "Negative", "Neutral", "Positive", "Very Positive"]
+                range=[0, 1],
+                tickvals=[0, 0.3, 0.7, 1],
+                ticktext=["None", "Low", "Medium", "High"]
             )
             st.plotly_chart(fig_timeline, use_container_width=True)
         except KeyError:
-            st.warning(f"No valid {date_column} data or Sentiment column for timeline. Ensure dates and sentiment are computed.")
-    elif not "Sentiment" in dfc.columns:
-        st.warning("Compute sentiment first to enable the timeline.")
+            st.warning(f"No valid {date_column} data or Toxicity column for timeline. Ensure dates and toxicity are computed.")
+    elif not "Toxicity_Score" in dfc.columns:
+        st.warning("Compute toxicity first to enable the timeline.")
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
 else:
