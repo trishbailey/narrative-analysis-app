@@ -197,7 +197,7 @@ else:
     if "df" in st.session_state:
         st.info("Run clustering to generate narratives.")
     else:
-        st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet. Optional: Date, URL.")
+        st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet, Author. Optional: Date, URL, Likes, Reposts, Replies.")
     st.stop()
 
 # --- Embeddings ---
@@ -429,8 +429,163 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             st.warning("Insufficient time span in data for trends. All dates are the same or invalid.")
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
+
+    # Top 10 Posters Analysis
+    st.subheader("Top Posters Analysis")
+    if 'author' in dfc.columns:
+        # Compute top 10 by volume
+        volume_by_author = dfc.groupby('author').size().nlargest(10).reset_index(name='Volume')
+        # Compute top 10 by engagement (sum of likes, reposts, replies)
+        engagement_cols = [col for col in ['likes', 'reposts', 'replies'] if col in dfc.columns]
+        if engagement_cols:
+            engagement_by_author = dfc.groupby('author')[engagement_cols].sum().sum(axis=1).nlargest(10).reset_index(name='Engagement')
+        else:
+            engagement_by_author = pd.DataFrame({'author': [], 'Engagement': []})
+            st.warning("No engagement columns (likes, reposts, replies) found in dataset. Engagement chart skipped.")
+        
+        # Create two-column layout
+        col1, col2 = st.columns(2)
+        
+        # Volume Bar Chart
+        with col1:
+            fig_volume_authors = px.bar(
+                volume_by_author,
+                x='Volume',
+                y='author',
+                title="Top 10 Posters by Volume",
+                color='author',
+                color_discrete_sequence=COLOR_PALETTE,
+                orientation='h'
+            )
+            fig_volume_authors.update_traces(
+                marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),
+                text=volume_by_author['Volume'],
+                textposition='auto'
+            )
+            fig_volume_authors.update_layout(
+                font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
+                title=dict(text="Top 10 Posters by Volume", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
+                xaxis=dict(title="Post Count", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="rgba(0,0,0,0.1)"),
+                yaxis=dict(title="Author", title_font=dict(size=14), tickfont=dict(size=12)),
+                plot_bgcolor="rgba(247,249,252,0.8)",
+                paper_bgcolor="rgba(255,255,255,0)",
+                showlegend=False,
+                margin=dict(l=50, r=50, t=80, b=50),
+                hovermode="closest",
+                hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
+            )
+            if not volume_by_author.empty:
+                max_volume_author = volume_by_author.iloc[0]['author']
+                max_volume_value = volume_by_author.iloc[0]['Volume']
+                fig_volume_authors.add_annotation(
+                    x=max_volume_value,
+                    y=max_volume_author,
+                    text=f"Top: {max_volume_value}",
+                    showarrow=True,
+                    arrowhead=2,
+                    ax=20,
+                    ay=-30,
+                    font=dict(size=12, color="#1a3c6d")
+                )
+            st.plotly_chart(fig_volume_authors, use_container_width=True)
+        
+        # Engagement Bar Chart
+        with col2:
+            if not engagement_by_author.empty:
+                fig_engagement_authors = px.bar(
+                    engagement_by_author,
+                    x='Engagement',
+                    y='author',
+                    title="Top 10 Posters by Engagement",
+                    color='author',
+                    color_discrete_sequence=COLOR_PALETTE,
+                    orientation='h'
+                )
+                fig_engagement_authors.update_traces(
+                    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),
+                    text=engagement_by_author['Engagement'].round(0).astype(int),
+                    textposition='auto'
+                )
+                fig_engagement_authors.update_layout(
+                    font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
+                    title=dict(text="Top 10 Posters by Engagement", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
+                    xaxis=dict(title="Engagement (Likes + Reposts + Replies)", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="rgba(0,0,0,0.1)"),
+                    yaxis=dict(title="Author", title_font=dict(size=14), tickfont=dict(size=12)),
+                    plot_bgcolor="rgba(247,249,252,0.8)",
+                    paper_bgcolor="rgba(255,255,255,0)",
+                    showlegend=False,
+                    margin=dict(l=50, r=50, t=80, b=50),
+                    hovermode="closest",
+                    hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
+                )
+                max_engagement_author = engagement_by_author.iloc[0]['author']
+                max_engagement_value = engagement_by_author.iloc[0]['Engagement']
+                fig_engagement_authors.add_annotation(
+                    x=max_engagement_value,
+                    y=max_engagement_author,
+                    text=f"Top: {int(max_engagement_value)}",
+                    showarrow=True,
+                    arrowhead=2,
+                    ax=20,
+                    ay=-30,
+                    font=dict(size=12, color="#1a3c6d")
+                )
+                st.plotly_chart(fig_engagement_authors, use_container_width=True)
+
+    # Author-Theme Correlation
+    st.subheader("Author-Theme Correlation")
+    if 'author' in dfc.columns:
+        # Compute correlation (post counts by author and cluster)
+        correlation_data = dfc.groupby(['author', 'Cluster']).size().unstack(fill_value=0)
+        # Select top 10 authors by volume (or engagement, configurable)
+        top_authors = volume_by_author['author'].tolist()
+        correlation_data = correlation_data.loc[correlation_data.index.isin(top_authors)]
+        if not correlation_data.empty:
+            # Map cluster IDs to short labels
+            correlation_data.columns = [short_labels_map.get(col, f"Cluster {col}") for col in correlation_data.columns]
+            # Create heatmap
+            fig_correlation = px.imshow(
+                correlation_data,
+                labels=dict(x="Narrative", y="Author", color="Post Count"),
+                title="Author-Narrative Correlation (Post Counts)",
+                color_continuous_scale="RdBu",
+                aspect="auto"
+            )
+            fig_correlation.update_layout(
+                font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
+                title=dict(text="Author-Narrative Correlation (Post Counts)", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
+                xaxis=dict(title="Narrative", title_font=dict(size=14), tickfont=dict(size=12), tickangle=45),
+                yaxis=dict(title="Author", title_font=dict(size=14), tickfont=dict(size=12)),
+                plot_bgcolor="rgba(247,249,252,0.8)",
+                paper_bgcolor="rgba(255,255,255,0)",
+                margin=dict(l=50, r=50, t=80, b=50),
+                hovermode="closest",
+                hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
+            )
+            # Add annotation for highest correlation
+            max_value = correlation_data.max().max()
+            max_loc = np.where(correlation_data == max_value)
+            max_author = correlation_data.index[max_loc[0][0]]
+            max_narrative = correlation_data.columns[max_loc[1][0]]
+            fig_correlation.add_annotation(
+                x=max_narrative,
+                y=max_author,
+                text=f"Peak: {int(max_value)}",
+                showarrow=True,
+                arrowhead=2,
+                ax=20,
+                ay=-30,
+                font=dict(size=12, color="#1a3c6d")
+            )
+            st.plotly_chart(fig_correlation, use_container_width=True)
+        else:
+            st.warning("No data available for author-theme correlation. Ensure authors and clusters are present.")
+    else:
+        st.warning("No 'author' column found in dataset. Author-theme correlation skipped.")
+
 else:
     if "df" in st.session_state and not "clustered" in st.session_state:
         st.info("Run clustering to generate narratives.")
     else:
-        st.info("Upload a dataset to proceed.")
+        st.info("Upload a dataset to proceed. Required: Title, Snippet, Author. Optional: Date, URL, Likes, Reposts, Replies.")
+    st.stop()
