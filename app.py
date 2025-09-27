@@ -498,8 +498,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         y="Volume",
         title="Narrative Volumes",
         color="Narrative",
-        color_discrete_sequence=COLOR_PALETTE,
-        text="Narrative"  # Use Narrative as text for wrapping
+        color_discrete_sequence=COLOR_PALETTE
     )
     # Enhance bar chart
     fig_volumes.update_traces(
@@ -507,19 +506,19 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             line=dict(width=1, color='#ffffff'),
             opacity=0.9
         ),
-        textposition='auto'  # Automatically position text to avoid overlap
+        text=""  # Remove text inside boxes
     )
     fig_volumes.update_layout(
         font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
         title=dict(text="Narrative Volumes", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
         xaxis=dict(
             title="Narrative",
-            tickangle=45,  # Rotate labels 45 degrees for better readability
+            tickangle=0,  # Labels straight horizontally
             title_font=dict(size=14),
-            tickfont=dict(size=10),  # Slightly smaller font to fit wrapped text
-            tickmode="array",  # Ensure all labels are displayed
-            tickvals=volume_data["Narrative"],  # Match tick values to narrative labels
-            ticktext=volume_data["Narrative"].apply(lambda x: "<br>".join(x.split()) if len(x.split()) > 2 else x)  # Wrap long labels with <br>
+            tickfont=dict(size=10),  # Adjust font size to prevent overlap
+            tickmode="array",
+            tickvals=volume_data["Narrative"],
+            ticktext=volume_data["Narrative"]
         ),
         yaxis=dict(
             title="Volume",
