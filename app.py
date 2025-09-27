@@ -215,9 +215,27 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     # Sentiment by Narrative (stacked % positive/neutral/negative)
     st.subheader("Sentiment by Narrative")
     if st.button("Compute sentiment"):
-        with st.spinner("Scoring sentiment..."):
-            dfc = add_vader_sentiment(dfc)  # Adds Sentiment column (-1 to 1)
-            st.session_state["df"] = dfc
+if st.button("Compute sentiment"):
+    with st.spinner("Scoring sentiment with Grok..."):
+        def compute_grok_sentiment(text):
+            prompt = f"Analyze the sentiment of this text on a scale of -1 (very negative) to 1 (very positive), considering context and sarcasm. Output only the score as a float (e.g., 0.7)."
+            try:
+                response = client.chat.completions.create(
+                    model="grok-4-fast-reasoning",
+                    messages=[{"role": "user", "content": prompt + f"\n\nText: {text[:500]}"}],  # Truncate for tokens
+                    max_tokens=10,
+                    temperature=0.1
+                )
+                score = float(response.choices[0].message.content.strip())
+                return score
+            except Exception as e:
+                st.warning(f"Sentiment error for text: {e}")
+                return 0.0
+
+        # Apply sentiment analysis to each row, combining Title and Snippet
+        dfc["Sentiment"] = dfc.apply(lambda row: compute_grok_sentiment(row["Snippet"] + " " + str(row["Title"])), axis=1)
+        st.session_state["df"] = dfc
+    st.success("Sentiment computed with Grok.")
     if "Sentiment" in dfc.columns:
         sentiment_cuts = pd.cut(dfc["Sentiment"], bins=[-1.0, -0.1, 0.1, 1.0], labels=["Negative", "Neutral", "Positive"])
         sentiment_data = dfc.groupby(["Cluster", sentiment_cuts]).size().reset_index(name="Count")
