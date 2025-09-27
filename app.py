@@ -19,7 +19,7 @@ from narrative.narrative_cluster import run_kmeans, attach_clusters
 # --- Page setup ---
 st.set_page_config(page_title="Narrative Analysis", layout="wide")
 
-# Custom CSS for a polished look with updated background
+# Custom CSS for a polished look with updated sidebar background
 st.markdown("""
     <style>
     .main .block-container {
@@ -34,7 +34,7 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .stSidebar, .stSidebar h2, .stSidebar label, .stSidebar .stCheckbox label, .stSidebar .stButton>button, .stSidebar .stFileUploader label {
-        color: #ffffff !important; /* White text for sidebar contrast */
+        color: #ffffff !important; /* White text for high contrast */
     }
     h1, h2, h3 {
         font-family: 'Roboto', sans-serif;
@@ -156,12 +156,11 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
 # --- Section 1: Load & Normalize ---
 st.sidebar.header("Load Data")
 uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8 / UTF-16 / TSV)", type=["csv", "tsv"])
-use_demo = st.sidebar.checkbox("Use tiny demo data", value=False)
 
 if st.sidebar.button("Reset data & state"):
     for k in ["df", "embeddings", "data_sig", "clustered", "labels", "baseline", "assigned_from_baseline", "narratives_generated"]:
         st.session_state.pop(k, None)
-    st.success("State cleared. Upload or enable demo again.")
+    st.success("State cleared. Upload to proceed.")
     st.stop()
 
 def _df_signature(d: pd.DataFrame):
@@ -178,14 +177,6 @@ try:
         raw = read_csv_auto(uploaded)
         if raw is not None:
             df = normalize_to_canonical(raw)
-    elif use_demo:
-        demo = pd.DataFrame({
-            "headline": ["Company X faces investor lawsuit", "CEO of Company Y announces changes", "Analysts debate revenues"],
-            "summary": ["Plaintiffs allege misleading statements.", "Restructuring aims to streamline.", "Market expects mixed results."],
-            "published": ["2025-09-01", "2025-09-05", "2025-09-10"],
-            "link": ["https://example.com/x-lawsuit", "https://example.com/y-ceo", "https://example.com/analyst-q3"]
-        })
-        df = normalize_to_canonical(demo)
 except Exception as e:
     error = str(e)
 
@@ -206,7 +197,7 @@ else:
     if "df" in st.session_state:
         st.info("Run clustering to generate narratives.")
     else:
-        st.info("Upload a CSV/TSV or enable demo to proceed. Required: Title, Snippet. Optional: Date, URL.")
+        st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet. Optional: Date, URL.")
     st.stop()
 
 # --- Embeddings ---
@@ -281,8 +272,8 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     narratives = st.session_state["narratives"]
     # Display Narratives with short headers
     st.subheader("Narratives")
-    for cid, narrative in narratives.items():
-        st.write(f"**{short_labels_map[cid]}**: {narrative}")
+    for i, cid in enumerate(sorted(narratives.keys()), start=1):
+        st.write(f"{i}. **{short_labels_map[cid]}**: {narratives[cid]}")
     # Bar Chart of Narrative Volumes with horizontal short labels
     volume_data = dfc["Cluster"].value_counts().reset_index()
     volume_data.columns = ["Cluster", "Volume"]
