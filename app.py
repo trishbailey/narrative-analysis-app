@@ -223,27 +223,33 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
         st.caption("Click **Compute sentiment** to score and visualize.")
 
     # Timeline of Narratives (Sentiment Trend)
-    if "Date" in dfc.columns and dfc["Date"].notna().any():
-        dfc["Date"] = pd.to_datetime(dfc["Date"], errors="coerce")
-        timeline_data = dfc.groupby(["Cluster", pd.Grouper(key="Date", freq="W")])["Sentiment"].mean().reset_index()
-        timeline_data["Narrative"] = timeline_data["Cluster"].map(labels_map)
-        st.subheader("Sentiment Trend Over Time")
-        fig_timeline = px.line(
-            timeline_data,
-            x="Date",
-            y="Sentiment",
-            color="Narrative",
-            title="Weekly Average Sentiment by Narrative",
-            labels={"Sentiment": "Average Sentiment", "Date": "Week"},
-            markers=True
-        )
-        fig_timeline.update_yaxes(
-            range=[-1, 1],
-            tickvals=[-1, -0.5, 0, 0.5, 1],
-            ticktext=["Very Negative", "Negative", "Neutral", "Positive", "Very Positive"]
-        )
-        st.plotly_chart(fig_timeline, width="stretch")
-    else:
-        st.warning("No 'Date' column found or no valid dates. Add it to your dataset for the timeline.")
+    if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
+        dfc = st.session_state["df"].copy()
+        date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
+        if date_column and dfc[date_column].notna().any():
+            dfc[date_column] = pd.to_datetime(dfc[date_column], errors="coerce")
+            try:
+                timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq="W")])["Sentiment"].mean().reset_index()
+                timeline_data["Narrative"] = timeline_data["Cluster"].map(labels_map)
+                st.subheader("Sentiment Trend Over Time")
+                fig_timeline = px.line(
+                    timeline_data,
+                    x=date_column,
+                    y="Sentiment",
+                    color="Narrative",
+                    title="Weekly Average Sentiment by Narrative",
+                    labels={"Sentiment": "Average Sentiment", date_column: "Week"},
+                    markers=True
+                )
+                fig_timeline.update_yaxes(
+                    range=[-1, 1],
+                    tickvals=[-1, -0.5, 0, 0.5, 1],
+                    ticktext=["Very Negative", "Negative", "Neutral", "Positive", "Very Positive"]
+                )
+                st.plotly_chart(fig_timeline, width="stretch")
+            except KeyError:
+                st.warning(f"No valid {date_column} data or Sentiment column for timeline. Ensure dates and sentiment are computed.")
+        else:
+            st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
 else:
     st.info("Upload a dataset and run clustering to generate narratives.")
