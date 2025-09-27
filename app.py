@@ -5,7 +5,7 @@
 # - KMeans clustering (one click)
 # - Generate fresh narrative summaries with short 2-4 word labels for graphics
 # - Narrative volumes (bar chart with short labels)
-# - Sentiment by narrative (colored bars with short labels)
+# - Sentiment by narrative (stacked bars showing % positive/neutral/negative with short labels)
 # - Timeline of narratives over time (sentiment trend with short labels)
 import streamlit as st
 import pandas as pd
@@ -69,7 +69,8 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
         "Create a fresh, original summary of the main gist of these social media posts clustered around a theme. "
         "Do not copy-paste, quote, or repeat any specific tweet content literally. "
         "Identify key actors, events, conflicts, resolutions, and themes in a concise 1-2 sentence summary (under 50 words). "
-        "Suggest a detailed, meaningful label for this narrative (10-20 words) and a short 2-4 word label derived from the summary. "
+        "Suggest a detailed, meaningful label for this narrative (10-20 words). "
+        "Suggest a short 2-4 word label derived from the summary. "
         "Output format: Summary: [your fresh summary] Detailed Label: [your detailed label] Short Label: [your 2-4 word label]"
         f"Posts:\n{combined_text}"
     )
@@ -190,10 +191,10 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
         short_labels_map[cid] = short_label
         narratives[cid] = summary
 
-    # Display Narratives
+    # Display Narratives with short headers
     st.subheader("Narratives")
     for cid, narrative in narratives.items():
-        st.write(f"**{labels_map[cid]}**: {narrative}")
+        st.write(f"**{short_labels_map[cid]}**: {narrative}")
 
     # Bar Chart of Narrative Volumes
     volume_data = dfc["Cluster"].value_counts().reset_index()
@@ -202,26 +203,29 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
     st.subheader("Narrative Volumes")
     st.bar_chart(volume_data.set_index("Narrative")["Volume"], height=400)
 
-    # Sentiment by Narrative
+    # Sentiment by Narrative (stacked % positive/neutral/negative)
     st.subheader("Sentiment by Narrative")
     if st.button("Compute sentiment"):
         with st.spinner("Scoring sentiment..."):
             dfc = add_vader_sentiment(dfc)  # Adds Sentiment column (-1 to 1)
             st.session_state["df"] = dfc
     if "Sentiment" in dfc.columns:
-        sentiment_data = dfc.groupby("Cluster")["Sentiment"].mean().reset_index()
+        sentiment_cuts = pd.cut(dfc["Sentiment"], bins=[-1.0, -0.1, 0.1, 1.0], labels=["Negative", "Neutral", "Positive"])
+        sentiment_data = dfc.groupby(["Cluster", sentiment_cuts]).size().reset_index(name="Count")
+        sentiment_data["Percentage"] = sentiment_data.groupby("Cluster")["Count"].transform(lambda x: x / x.sum() * 100)
         sentiment_data["Narrative"] = sentiment_data["Cluster"].map(short_labels_map)
-        sentiment_cuts = pd.cut(sentiment_data["Sentiment"], bins=[-1.0, -0.1, 0.1, 1.0], labels=["Negative", "Neutral", "Positive"])
         fig_sentiment = px.bar(
             sentiment_data,
             x="Narrative",
-            y="Sentiment",
-            color=sentiment_cuts,
-            title="Average Sentiment by Narrative",
+            y="Percentage",
+            color="Sentiment",
+            title="Sentiment Distribution by Narrative (%)",
             color_discrete_map={"Negative": "#d62728", "Neutral": "#9e9e9e", "Positive": "#2ca02c"},
-            labels={"Sentiment": "Average Sentiment (-1 to 1)"}
+            labels={"Percentage": "Percentage (%)"},
+            category_orders={"Sentiment": ["Positive", "Neutral", "Negative"]}
         )
-        st.plotly_chart(fig_sentiment, width="stretch")
+        fig_sentiment.update_layout(barmode="stack")
+        st.plotly_chart(fig_sentiment, use_container_width=True)
     else:
         st.caption("Click **Compute sentiment** to score and visualize.")
 
@@ -247,7 +251,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
                 tickvals=[-1, -0.5, 0, 0.5, 1],
                 ticktext=["Very Negative", "Negative", "Neutral", "Positive", "Very Positive"]
             )
-            st.plotly_chart(fig_timeline, width="stretch")
+            st.plotly_chart(fig_timeline, use_container_width=True)
         except KeyError:
             st.warning(f"No valid {date_column} data or Sentiment column for timeline. Ensure dates and sentiment are computed.")
     elif not "Sentiment" in dfc.columns:
