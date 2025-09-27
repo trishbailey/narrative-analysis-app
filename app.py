@@ -53,7 +53,7 @@ def first_sentence(text: str, max_len=180) -> str:
             return s[:max_len]
     return (text[:max_len] or "").strip()
 
-def central_indexes(mask_idx, k=5):
+def central_indexes(emb, mask_idx, k=5):
     sub = emb[mask_idx]
     if len(sub) == 0:
         return []
@@ -174,7 +174,7 @@ if st.sidebar.button("Run clustering"):
             mask_idx = np.where(df_clustered["Cluster"].values == cid)[0]
             if len(mask_idx) == 0:
                 continue
-            top_idx = central_indexes(mask_idx, k=5)
+            top_idx = central_indexes(embeddings, mask_idx, k=5)
             central_texts = [" ".join([str(df_clustered.iloc[i].get("Title", "") or ""), first_sentence(df_clustered.iloc[i].get("Snippet", ""))]).strip() for i in top_idx]
             summary, detailed_label, short_label = llm_narrative_summary(central_texts, cid)
             labels_map[cid] = detailed_label
@@ -209,7 +209,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
     st.subheader("Narrative Volumes")
     fig_volumes = px.bar(volume_data, x="Narrative", y="Volume", title="Narrative Volumes")
-    fig_volumes.update_layout(xaxis={'tickangle': 0})  # Horizontal labels
+    fig_volumes.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Volume")  # Horizontal labels
     st.plotly_chart(fig_volumes, use_container_width=True)
 
     # Sentiment by Narrative (stacked % positive/neutral/negative)
@@ -233,7 +233,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             labels={"Percentage": "Percentage (%)"},
             category_orders={"Sentiment": ["Positive", "Neutral", "Negative"]}
         )
-        fig_sentiment.update_layout(barmode="stack", bargap=0.1, xaxis={'tickangle': 0})  # Horizontal labels
+        fig_sentiment.update_layout(barmode="stack", bargap=0.1, xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Percentage (%)")  # Horizontal labels
         st.plotly_chart(fig_sentiment, use_container_width=True)
     else:
         st.caption("Click **Compute sentiment** to score and visualize.")
