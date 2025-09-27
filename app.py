@@ -34,7 +34,7 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .stSidebar, .stSidebar h2, .stSidebar label, .stSidebar .stCheckbox label, .stSidebar .stButton>button, .stSidebar .stFileUploader label {
-        color: #ffffff !important; /* White text for high contrast */
+        color: #4b5563 !important; /* Dark gray text for high contrast */
     }
     h1, h2, h3 {
         font-family: 'Roboto', sans-serif;
