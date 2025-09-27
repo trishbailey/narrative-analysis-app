@@ -37,7 +37,7 @@ st.title("Narrative Analysis")
 # Section 1 — Load & normalize (idempotent; preserves clustered df)
 # ---------------------------
 st.sidebar.header("Load Data")
-uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8)", type=["csv"])
+uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8 / UTF-16 / TSV)", type=["csv", "tsv"])
 use_demo = st.sidebar.checkbox("Use tiny demo data", value=False)
 
 # A Reset button so you can intentionally clear state and start clean
@@ -57,11 +57,12 @@ def _df_signature(d: pd.DataFrame):
 
 df = None
 error = None
+
 try:
     if uploaded is not None:
-raw = read_csv_auto(uploaded)   # robust reader (UTF-16/UTF-8-SIG/TSV)
-df  = normalize_to_canonical(raw)
-
+        # Robust reader (handles UTF-16 with BOM, UTF-8-SIG, tab/comma, skips bad lines)
+        raw = read_csv_auto(uploaded)
+        df = normalize_to_canonical(raw)
     elif use_demo:
         demo = pd.DataFrame({
             "headline": [
@@ -94,7 +95,7 @@ if df is not None and not df.empty:
     if ("data_sig" not in st.session_state) or (st.session_state["data_sig"] != new_sig):
         st.session_state["df"] = df.reset_index(drop=True)
         st.session_state["data_sig"] = new_sig
-        for k in ["embeddings", "clustered", "assigned_from_baseline"]:
+        for k in ["embeddings", "clustered", "assigned_from_baseline", "labels"]:
             st.session_state.pop(k, None)
         st.success(f"Loaded {len(df)} rows (new dataset).")
     else:
@@ -102,13 +103,14 @@ if df is not None and not df.empty:
 else:
     if "df" not in st.session_state:
         st.info(
-            "Upload a CSV or enable the demo to proceed.\n\n"
+            "Upload a CSV/TSV or enable the demo to proceed.\n\n"
             "Required: Title, Snippet. Optional: Date, URL."
         )
         st.stop()
 
 # Show a quick preview (whatever is in state now)
 st.dataframe(st.session_state["df"].head(20), width="stretch")
+
 
 # ---------------------------
 # Embeddings (cached)
