@@ -311,6 +311,46 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
     except Exception as e:
         return f"Error: {e}", f"Narrative {cid}", f"Cluster {cid}"
 
+def llm_key_takeaways(narratives, volume_data, top_authors_volume, top_authors_engagement, correlation_data, timeline_data=None):
+    """
+    Generate AI-driven key takeaways using Grok based on narratives, volumes, top posters, and correlations.
+    Returns a list of bullet points with insights.
+    """
+    # Prepare input data for Grok
+    narrative_summary = "\n".join([f"Narrative {i+1} ({short_labels_map[cid]}): {narratives[cid]}" for i, cid in enumerate(sorted(narratives.keys()))])
+    volume_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts" for _, row in volume_data.iterrows()])
+    top_authors_volume_summary = "\n".join([f"{row['display_label']}: {row['Volume']} posts" for _, row in top_authors_volume.iterrows()]) if not top_authors_volume.empty else "No top authors by volume."
+    top_authors_engagement_summary = "\n".join([f"{row['display_label']}: {row['Engagement']} engagement" for _, row in top_authors_engagement.iterrows()]) if not top_authors_engagement.empty else "No top authors by engagement."
+    correlation_summary = "\n".join([f"{author}: {', '.join([f'{col}: {val}' for col, val in correlation_data.loc[author].items() if val > 0])}" for author in correlation_data.index]) if not correlation_data.empty else "No author-theme correlations."
+    timeline_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts on {row[date_column].strftime('%Y-%m-%d')}" for _, row in timeline_data.iterrows()]) if timeline_data is not None and not timeline_data.empty else "No timeline data."
+
+    prompt = (
+        "Analyze the following social media data to identify 3-5 key takeaways about significant trends and insights. "
+        "Focus on dominant narratives, influential posters, engagement patterns, and author-theme correlations. "
+        "Provide concise bullet points (each under 50 words) explaining the 'so what' of the data. "
+        "Do not quote specific posts or data verbatim, but interpret the overall trends. "
+        f"Narratives:\n{narrative_summary}\n\n"
+        f"Narrative Volumes:\n{volume_summary}\n\n"
+        f"Top Posters by Volume:\n{top_authors_volume_summary}\n\n"
+        f"Top Posters by Engagement:\n{top_authors_engagement_summary}\n\n"
+        f"Author-Theme Correlations:\n{correlation_summary}\n\n"
+        f"Timeline Trends:\n{timeline_summary}\n\n"
+        "Output format: - Insight 1\n- Insight 2\n- Insight 3\n..."
+    )
+    try:
+        response = client.chat.completions.create(
+            model="grok-4-fast-reasoning",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
+            temperature=0.7
+        )
+        output = response.choices[0].message.content.strip()
+        # Split into bullet points
+        takeaways = [line.strip() for line in output.split("\n") if line.strip().startswith("-")]
+        return takeaways if takeaways else ["- No significant trends identified."]
+    except Exception as e:
+        return [f"- Error generating takeaways: {e}"]
+
 # --- Section 1: Load & Normalize ---
 st.sidebar.header("Load Data")
 uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8 / UTF-16 / TSV)", type=["csv", "tsv"])
@@ -492,6 +532,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     st.plotly_chart(fig_volumes, use_container_width=True)
     # Timeline of Narratives (Volume Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
+    timeline_data = None
     if date_column and dfc[date_column].notna().any():
         dfc[date_column] = pd.to_datetime(dfc[date_column], errors="coerce")
         min_date = dfc[date_column].min()
@@ -759,6 +800,22 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             st.warning("No data available for poster-theme correlation. Ensure posters and clusters are present.")
     else:
         st.warning("No 'author' or 'Influencer' column found in dataset. Poster-theme correlation skipped. Ensure your CSV includes an 'Influencer' column.")
+
+    # Wut Means? Key Takeaways
+    st.subheader("Wut Means? Key Takeaways 🤔")
+    if narratives and not volume_data.empty:
+        takeaways = llm_key_takeaways(
+            narratives,
+            volume_data,
+            volume_by_author,
+            engagement_by_author,
+            correlation_data,
+            timeline_data
+        )
+        for takeaway in takeaways:
+            st.markdown(takeaway)
+    else:
+        st.warning("Insufficient data for key takeaways. Ensure narratives and volume data are available.")
 
 else:
     if "df" in st.session_state and not "clustered" in st.session_state:
