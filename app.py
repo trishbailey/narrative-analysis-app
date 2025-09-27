@@ -10,7 +10,6 @@ from collections import Counter
 import openai
 import os
 import json
-import re
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto, normalize_to_canonical
@@ -223,8 +222,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         temperature=0.1
                     )
                     output = response.choices[0].message.content.strip()
-                    # Debug: Log raw response (remove in production)
-                    # st.write(f"Raw Grok response: {output}")
                     # Try parsing as JSON
                     try:
                         results = json.loads(output)
@@ -272,21 +269,19 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 scores = []
                 categories = []
                 texts = (dfc_filtered["Snippet"] + " " + dfc_filtered["Title"]).tolist()
-                # Debug: Print lengths for diagnostics (remove in production)
-                # st.write(f"Processing {len(texts)} valid texts for toxicity.")
                 for i in range(0, len(texts), batch_size):
                     batch_texts = texts[i:i + batch_size]
                     batch_scores, batch_categories = compute_grok_toxicity_batch(batch_texts)
                     scores.extend(batch_scores)
                     categories.extend(batch_categories)
-                    st.progress((i + min(batch_size, len(texts))) / len(texts)) # Progress bar
+                    # Ensure progress value is in [0.0, 1.0]
+                    progress = min((i + min(batch_size, len(texts))) / len(texts), 1.0) if len(texts) > 0 else 0.0
+                    st.progress(progress) # Progress bar
                 # Map scores back to original DataFrame
                 score_dict = dict(zip(dfc_filtered.index, scores))
                 category_dict = dict(zip(dfc_filtered.index, categories))
                 dfc["Toxicity_Score"] = dfc.index.map(lambda x: score_dict.get(x, 0.0))
                 dfc["Toxicity_Category"] = dfc.index.map(lambda x: category_dict.get(x, "neutral"))
-                # Debug: Verify lengths (remove in production)
-                # st.write(f"Length of scores: {len(scores)}, Length of filtered DF: {len(dfc_filtered)}, Length of original DF: {len(dfc)}")
                 if len(scores) != len(dfc_filtered):
                     st.warning(f"Length mismatch in toxicity scores: {len(scores)} scores vs {len(dfc_filtered)} rows. Padded with defaults.")
                 st.session_state["df"] = dfc
