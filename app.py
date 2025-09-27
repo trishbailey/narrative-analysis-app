@@ -17,6 +17,10 @@ import plotly.express as px
 import re
 import datetime as _dt
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
+import re
+from collections import Counter
+
 
 # --- Reusable modules ---
 from narrative.narrative_io import normalize_to_canonical
@@ -190,56 +194,147 @@ if run_btn:
     st.success("Clustering complete.")
 
 # ---------------------------
-# Auto-label ideas (from narrative one-liners)
+# Auto-label ideas (proper noun + TF-IDF keyphrase from central posts)
 # ---------------------------
-from narrative.narrative_summarize import summarize_narratives
-
 st.subheader("Auto-label ideas")
 
 if ("df" in st.session_state) and ("Cluster" in st.session_state["df"].columns):
     dfc = st.session_state["df"].copy()
 
-    # Ensure embeddings exist
+    # Ensure embeddings
     emb = st.session_state.get("embeddings")
     if (emb is None) or (len(emb) != len(dfc)):
         emb = embed_df_texts(dfc)
         st.session_state["embeddings"] = emb
 
-    # Build one-liners first (use cluster ids as the grouping key)
-    narr_df = summarize_narratives(dfc, emb, label_col="Cluster", topk_central=5)
-
-    # Create short labels from narratives (first few informative words)
-    STOP = {
-        "the","a","an","and","or","for","to","of","in","on","at","with","by","after","before","from",
-        "is","are","was","were","be","been","being","it","its","this","that","these","those","as",
-        "over","under","about","into","out","up","down","than","then","but","so","if","while","when",
-        "you","we","they","he","she","i"
+    # --- helpers (local) ---
+    # Boilerplate/low-value words we don't want in labels
+    JUNK = {
+        "rt","please","join","join me","link","watch","live","breaking","thanks","thank","proud",
+        "honored","glad","great","amazing","incredible","tonight","yesterday","today","tomorrow",
+        "hard work","grateful","pray","praying","deeply","heartbroken","sad","rip","thread",
+        "foxnews","cnn","msnbc","youtube","tiktok","instagram","facebook","x","twitter"
     }
-    def short_label(s: str, max_words: int = 5) -> str:
-        s = str(s or "")
-        toks = re.sub(r"[^A-Za-z0-9\s]", " ", s).lower().split()
-        kept = [w for w in toks if w not in STOP]
-        return (" ".join(kept[:max_words]) or "idea").title()
+    STOP = set(ENGLISH_STOP_WORDS) | {w for p in JUNK for w in p.split()}
 
-    # Map cluster id -> label via narrative rows
+    def first_sentence(text: str, max_len=180) -> str:
+        text = str(text or "").strip()
+        parts = re.split(r"(?<=[\.!?])\s+", text)
+        for s in parts:
+            s = s.strip()
+            if len(s) >= 25:
+                return s[:max_len]
+        return (text[:max_len] or "").strip()
+
+    def central_indexes(mask_idx, k=5):
+        """Return idx of top-k most central items inside mask_idx by cosine to centroid."""
+        sub = emb[mask_idx]
+        if len(sub) == 0:
+            return []
+        centroid = sub.mean(axis=0, keepdims=True)
+        sims = (centroid @ sub.T).ravel()  # cosine since emb ~ unit norm from SBERT
+        order = sims.argsort()[::-1][: min(k, len(sims))]
+        return [mask_idx[i] for i in order]
+
+    def proper_noun_phrase(text):
+        """
+        Grab the most frequent capitalized multiword phrase (names/orgs).
+        Ex: "Charlie Kirk", "House Republicans", "Supreme Court".
+        """
+        # Keep original casing for proper nouns
+        cand = re.findall(r"\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,3})\b", text)
+        # Filter junky starts
+        cand = [c.strip() for c in cand if c.lower() not in STOP and len(c) >= 2]
+        return cand
+
+    def best_proper_noun(texts):
+        c = Counter()
+        for t in texts:
+            for p in proper_noun_phrase(t):
+                # ignore short boilerplate e.g. "Tonight", "Breaking"
+                if p.lower() in JUNK or p.lower() in STOP:
+                    continue
+                c[p] += 1
+        if not c:
+            return ""
+        # Prefer the most common, tie-break by length (shorter = cleaner label head)
+        return sorted(c.items(), key=lambda x: (-x[1], len(x[0])))[0][0]
+
+    def tfidf_keyphrase(texts, ngram=(2,3)):
+        """
+        Return a high-signal bigram/trigram not dominated by stopwords/junk.
+        """
+        if not texts:
+            return ""
+        vectorizer = TfidfVectorizer(
+            lowercase=True,
+            stop_words=list(STOP),
+            ngram_range=ngram,
+            min_df=1,
+            max_df=0.8
+        )
+        try:
+            X = vectorizer.fit_transform(texts)
+        except ValueError:
+            return ""
+        terms = vectorizer.get_feature_names_out()
+        if len(terms) == 0:
+            return ""
+        # Average TF-IDF score across docs; pick top
+        scores = X.toarray().mean(axis=0)
+        idx = scores.argsort()[::-1]
+        for i in idx:
+            phrase = terms[i]
+            # reject phrases that are in our junk set or look too boilerplate
+            if phrase in STOP or phrase in JUNK:
+                continue
+            # reject phrases dominated by numbers or one-letter tokens
+            tokens = phrase.split()
+            if any(len(t) <= 2 for t in tokens) and not any(t.isalpha() and len(t) > 2 for t in tokens):
+                continue
+            return phrase.title()
+        return ""
+
+    # Build labels per cluster
     labels_map = {}
     used = set()
-    for _, r in narr_df.iterrows():
-        # narr_df["Idea"] is the cluster id as string because we passed label_col="Cluster"
-        try:
-            cid = int(r["Idea"])
-        except Exception:
+
+    for cid in sorted(dfc["Cluster"].unique()):
+        mask_idx = np.where(dfc["Cluster"].values == cid)[0]
+        if len(mask_idx) == 0:
             continue
-        base = short_label(r.get("Narrative", ""))
-        label = base or f"Idea {cid}"
+        top_idx = central_indexes(mask_idx, k=5)
+
+        # Central texts (keep original casing for proper nouns)
+        central_titles = [str(dfc.iloc[i].get("Title","") or "") for i in top_idx]
+        central_snips  = [first_sentence(dfc.iloc[i].get("Snippet","")) for i in top_idx]
+        central_texts  = [(" ".join([central_titles[i], central_snips[i]])).strip() for i in range(len(top_idx))]
+
+        # Head: proper noun (actor/topic)
+        head = best_proper_noun(" ".join(central_texts))
+        # Tail: tf-idf keyphrase
+        tail = tfidf_keyphrase(central_texts)
+
+        if head and tail:
+            label = f"{head} — {tail}"
+        elif head:
+            label = head
+        elif tail:
+            label = tail
+        else:
+            # last-resort: trimmed title of the most central
+            label = (central_titles[0] or central_snips[0] or f"Idea {cid}")[:60].strip()
+
+        # De-duplicate labels across clusters
+        base = label
         n = 2
         while label in used:
             label = f"{base} #{n}"
             n += 1
         used.add(label)
-        labels_map[cid] = label
+        labels_map[int(cid)] = label
 
-    # Apply and persist
+    # Apply & persist
     dfc["Label"] = dfc["Cluster"].map(labels_map).astype(str)
     st.session_state["labels"] = labels_map
     st.session_state["df"] = dfc
