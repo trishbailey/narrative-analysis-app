@@ -430,7 +430,7 @@ st.header("Run Clusters")
 st.markdown("Use the sliding scale to set the number of narrative categories for your data. You can always adjust it to capture the main narratives more exactly.")
 k = st.slider("Number of clusters", 2, 12, 6, 1)
 if st.button("Run clustering"):
-    with st.spinner("Hold on, we are generating narratives for you!"):
+    with st.spinner("We are generating narratives for you - this should take about 60 seconds. Perhaps another cup of coffee? ☕"):
         embeddings = embed_df_texts(st.session_state["df"])
         labels, _ = run_kmeans(embeddings, n_clusters=k)
         df_clustered = attach_clusters(st.session_state["df"], labels)
