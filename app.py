@@ -340,263 +340,296 @@ else:
                            "idea_top_terms.csv", "text/csv")
 
 # ---------------------------
-# 2D Semantic Map (UMAP)
+# 2D Semantic Map (UMAP) — centroid view first
 # ---------------------------
+import numpy as np
+import plotly.express as px
+
 st.subheader("2D Semantic Map (UMAP)")
 
 if "df" not in st.session_state:
     st.info("Load data first.")
 else:
-    dfc = st.session_state["df"]
-
-    # Require clusters (map is colored by cluster)
-    if "Cluster" not in dfc.columns:
-        st.info("Run clustering in the sidebar first to enable the map.")
+    dfm = st.session_state["df"].copy()
+    if "Cluster" not in dfm.columns:
+        st.info("Run clustering or Assign to baseline to enable the map.")
     else:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            n_neighbors = st.slider("UMAP: n_neighbors", 5, 50, 15, 1,
-                                    help="Lower = more local structure; higher = smoother clusters.")
-        with col_b:
-            min_dist = st.slider("UMAP: min_dist", 0.01, 0.50, 0.10, 0.01,
-                                 help="Lower = tighter clusters; higher = more spread out.")
+        if "Label" not in dfm.columns:
+            dfm["Label"] = dfm["Cluster"].astype(str)
+
+        view = st.radio("View", ["Idea centroids", "All posts"], horizontal=True)
+
+        n_neighbors = st.slider("UMAP: n_neighbors", 5, 50, 15)
+        min_dist = st.slider("UMAP: min_dist", 0.01, 0.50, 0.10, 0.01)
 
         if st.button("Generate 2D Map"):
             with st.spinner("Computing UMAP projection..."):
-                # Robust: if embeddings are missing for any reason, recompute now
                 emb = st.session_state.get("embeddings")
-                if emb is None:
-                    emb = embed_df_texts(dfc)
+                if emb is None or len(emb) != len(dfm):
+                    emb = embed_df_texts(dfm)
                     st.session_state["embeddings"] = emb
 
                 coords = compute_umap(emb, n_neighbors=n_neighbors, min_dist=min_dist)
-                df_map = attach_coords(dfc, coords)
-                df_map["_hover"] = build_hover_html(df_map)
+                dfm["x"], dfm["y"] = coords[:,0], coords[:,1]
 
-            fig_map = px.scatter(
-                df_map, x="x", y="y", color="Cluster",
-                hover_name="Title",
-                hover_data={"x": False, "y": False, "_hover": True, "Cluster": True},
-                title="UMAP: hover to inspect posts", opacity=0.85
-            )
-            fig_map.update_traces(hovertemplate="%{customdata[0]}")
-            fig_map.update_traces(customdata=df_map[["_hover"]].to_numpy())
-            fig_map.update_layout(legend_title_text="Cluster", template="plotly_white")
-            st.plotly_chart(fig_map, use_container_width=True)  # OK to keep; see note in logs
-
+                if view == "Idea centroids":
+                    g = dfm.groupby("Label", as_index=False).agg(
+                        x=("x","mean"), y=("y","mean"), Count=("Label","size"))
+                    fig = px.scatter(g, x="x", y="y", size="Count", color="Label",
+                                     text="Label", title="Ideas (centroids; size = volume)")
+                    fig.update_traces(textposition="top center")
+                else:
+                    fig = px.scatter(dfm, x="x", y="y", color="Label",
+                                     hover_name="Title", title="All posts (colored by idea)",
+                                     opacity=0.8)
+            fig.update_layout(template="plotly_white", legend_title_text="Idea")
+            st.plotly_chart(fig, width="stretch")
 
 # ---------------------------
-# KWIC: keyword-in-context
+# Keyword-in-Context (KWIC) — counts by idea + highlighted examples
 # ---------------------------
+import re
+import plotly.express as px
+
 st.subheader("Keyword-in-Context (KWIC)")
 kw_col1, kw_col2, kw_col3 = st.columns([2,1,1])
 with kw_col1:
     kw_pattern = st.text_input("Keyword or regex (e.g., lawsuit|settlement|class action)", "")
 with kw_col2:
-    kw_window = st.number_input("Context window (chars)", min_value=20, max_value=200, value=50, step=5)
+    kw_window = st.number_input("Context window (chars)", 20, 200, 60, 5)
 with kw_col3:
-    cluster_filter = st.text_input("Restrict to cluster(s) (e.g., 0 or 0,2)", "")
+    cluster_filter = st.text_input("Restrict to idea(s) (e.g., 0 or 0,2)", "")
+
+def _hl(s, pat):
+    try:
+        return re.sub(f"({pat})", r"<mark>\1</mark>", s, flags=re.I)
+    except re.error:
+        return s  # bad regex → no highlight
 
 if st.button("Run KWIC") and kw_pattern.strip():
-    # Parse cluster filter
-    clusters = None
-    if cluster_filter.strip():
-        try:
-            if "," in cluster_filter:
-                clusters = [int(x.strip()) for x in cluster_filter.split(",")]
-            else:
-                clusters = int(cluster_filter.strip())
-        except:
-            st.warning("Could not parse cluster filter; searching all clusters.")
-            clusters = None
-
-    with st.spinner("Searching..."):
-        kwic_df = kwic_search(dfc, pattern=kw_pattern, window=int(kw_window), clusters=clusters)
-    st.write(f"KWIC matches: {len(kwic_df)}")
-
-    if not kwic_df.empty:
-        # Counts by cluster
-        kwic_counts = kwic_counts_by_cluster(kwic_df)
-        st.write("Matches by cluster:")
-        st.dataframe(kwic_counts, use_container_width=True)
-
-        # Co-occurrence (top terms in KWIC windows)
-        cooc_df = kwic_cooccurrence(kwic_df, top_n=20)
-        st.write("Top co-occurring terms per cluster (first rows):")
-        st.dataframe(cooc_df.head(20), use_container_width=True)
-
-        # Downloads
-        kwic_csv = kwic_df.to_csv(index=False).encode("utf-8")
-        cooc_csv = cooc_df.to_csv(index=False).encode("utf-8")
-        kc_csv   = kwic_counts.to_csv(index=False).encode("utf-8")
-
-        dl1, dl2, dl3 = st.columns(3)
-        with dl1:
-            st.download_button("Download KWIC matches (CSV)", kwic_csv, "kwic_matches.csv", "text/csv")
-        with dl2:
-            st.download_button("Download KWIC co-occurrence (CSV)", cooc_csv, "kwic_cooccurrence.csv", "text/csv")
-        with dl3:
-            st.download_button("Download KWIC counts (CSV)", kc_csv, "kwic_counts_by_cluster.csv", "text/csv")
+    if "df" not in st.session_state:
+        st.info("Load data first.")
     else:
-        st.info("No matches for that pattern.")
+        dfk = st.session_state["df"].copy()
+        if "Label" not in dfk.columns:
+            dfk["Label"] = dfk["Cluster"].astype(str)
+
+        # Cluster filter (by Label text)
+        if cluster_filter.strip():
+            try:
+                labs = [x.strip() for x in cluster_filter.split(",")]
+                dfk = dfk[dfk["Label"].isin(labs) | dfk["Cluster"].isin([int(x) for x in labs if x.isdigit()])]
+            except Exception:
+                pass
+
+        # Build normalized text once
+        dfk = ensure_text_column(dfk)
+
+        # Find matches
+        rows = []
+        pat = re.compile(kw_pattern, re.I)
+        for _, r in dfk.iterrows():
+            txt = r["_text_norm"]
+            for m in pat.finditer(txt):
+                start, end = m.start(), m.end()
+                left = txt[max(0, start-kw_window): start]
+                match = txt[start:end]
+                right = txt[end: min(len(txt), end+kw_window)]
+                rows.append({
+                    "Label": r["Label"],
+                    "Title": r["Title"],
+                    "Left": left, "Match": match, "Right": right,
+                    "URL": r.get("URL","")
+                })
+        import pandas as pd
+        kwic_df = pd.DataFrame(rows)
+
+        st.write(f"KWIC matches: **{len(kwic_df)}**")
+        if kwic_df.empty:
+            st.info("No matches. Try a broader term or remove cluster filter.")
+        else:
+            # Counts by idea
+            counts = (kwic_df["Label"].value_counts()
+                      .rename_axis("Idea").reset_index(name="Matches")
+                      .sort_values("Idea"))
+            st.dataframe(counts, width="stretch")
+            figc = px.bar(counts, x="Idea", y="Matches", title="KWIC matches by idea")
+            st.plotly_chart(figc, width="stretch")
+
+            # Top highlighted examples
+            st.markdown("**Examples (highlighted):**")
+            for _, r in kwic_df.head(12).iterrows():
+                snippet = _hl(f"{r['Left']}{r['Match']}{r['Right']}", kw_pattern)
+                st.markdown(f"- **{r['Label']}** — {r['Title']}  \n{snippet}", unsafe_allow_html=True)
+
+            # Download
+            st.download_button("Download KWIC matches (CSV)",
+                               kwic_df.to_csv(index=False).encode("utf-8"),
+                               "kwic_matches.csv", "text/csv")
+
 
 # ---------------------------
-# Sentiment (VADER)
+# Sentiment (VADER) — color summary + trend
 # ---------------------------
-st.subheader("Sentiment (VADER)")
+import numpy as np
+import plotly.express as px
+import pandas as pd
 
-# Guard: data must be loaded
+st.subheader("Sentiment")
+
 if "df" not in st.session_state:
     st.info("Load data first.")
 else:
-    dfc = st.session_state["df"]
-
-    # Guard: we summarize by cluster, so require clusters
-    if "Cluster" not in dfc.columns:
-        st.info("Run clustering first to see per-cluster sentiment.")
+    dfs = st.session_state["df"].copy()
+    if "Cluster" not in dfs.columns:
+        st.info("Run clustering or Assign to baseline first.")
     else:
-        # Primary action
-        compute_sent = st.button("Compute sentiment")
+        if "Label" not in dfs.columns:
+            dfs["Label"] = dfs["Cluster"].astype(str)
 
-        if compute_sent:
+        if st.button("Compute sentiment"):
             with st.spinner("Scoring sentiment..."):
-                df_sent = add_vader_sentiment(dfc)  # adds df["Sentiment"]
-                st.session_state["df"] = df_sent    # keep the new column
-                dfc = df_sent
+                dfs = add_vader_sentiment(dfs)   # adds Sentiment
+                st.session_state["df"] = dfs
 
-            st.success("Sentiment computed.")
+        if "Sentiment" in dfs.columns:
+            # Overall colored bars by idea
+            cuts = pd.cut(dfs["Sentiment"],
+                          bins=[-1.0,-0.05,0.05,1.0],
+                          labels=["Negative","Neutral","Positive"])
+            share = (dfs.assign(Bucket=cuts)
+                        .groupby(["Label","Bucket"]).size()
+                        .groupby(level=0).apply(lambda s: s/s.sum()*100)
+                        .rename("Percent").reset_index())
+            figb = px.bar(share, x="Label", y="Percent", color="Bucket",
+                          title="Sentiment by idea (share)", barmode="stack",
+                          color_discrete_map={"Positive":"#2ca02c","Neutral":"#9e9e9e","Negative":"#d62728"})
+            st.plotly_chart(figb, width="stretch")
 
-            # Build and show the summary now that Sentiment exists
-            sent_tbl = sentiment_by_cluster(dfc)
-            st.dataframe(sent_tbl, width="stretch")
-
-            # Downloads (only after we have sent_tbl)
-            sent_csv = sent_tbl.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "Download sentiment summary (CSV)",
-                sent_csv,
-                "sentiment_by_cluster.csv",
-                "text/csv"
-            )
-
-        # If sentiment was computed previously in this session, show latest table
-        elif "Sentiment" in dfc.columns:
-            sent_tbl = sentiment_by_cluster(dfc)
-            st.dataframe(sent_tbl, width="stretch")
-
-            sent_csv = sent_tbl.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "Download sentiment summary (CSV)",
-                sent_csv,
-                "sentiment_by_cluster.csv",
-                "text/csv"
-            )
+            # Trend over time (weekly mean sentiment)
+            if "Date" in dfs.columns and dfs["Date"].notna().any():
+                dfs["Date"] = pd.to_datetime(dfs["Date"], errors="coerce")
+                w = dfs.dropna(subset=["Date"]).copy()
+                w["Week"] = w["Date"].dt.to_period("W").apply(lambda r: r.start_time)
+                trend = (w.groupby(["Week","Label"])["Sentiment"]
+                           .mean().reset_index())
+                figt = px.line(trend, x="Week", y="Sentiment", color="Label",
+                               title="Mean sentiment over time (weekly)",
+                               markers=True, color_discrete_sequence=px.colors.qualitative.Set2)
+                figt.update_yaxes(range=[-1,1])
+                st.plotly_chart(figt, width="stretch")
         else:
-            st.caption("Click **Compute sentiment** to score and summarize by cluster.")
+            st.caption("Click **Compute sentiment** to score and visualize.")
+
 
 # ---------------------------
-# Timeline (counts or % by time bin) — using idea labels and bin filters
+# Timeline (smart defaults, labels, smoothing, auto-fallback)
 # ---------------------------
+import pandas as pd
+import plotly.express as px
+
 st.subheader("Timeline")
 
 if "df" not in st.session_state:
     st.info("Load data first.")
 else:
-    dfc = st.session_state["df"]
+    dfc = st.session_state["df"].copy()
 
     if "Date" not in dfc.columns or dfc["Date"].isna().all():
         st.info("No usable dates found. Ensure your CSV has a Date column (parseable).")
     elif "Cluster" not in dfc.columns:
-        st.info("Run clustering in the sidebar to enable the timeline.")
+        st.info("Run clustering (or Assign to baseline) to enable the timeline.")
     else:
-        # Labels fallback
         if "Label" not in dfc.columns:
             dfc["Label"] = dfc["Cluster"].astype(str)
 
-        # Controls
-        c1, c2, c3 = st.columns([1,1,1])
-        with c1:
-            bin_choice = st.selectbox("Time bin", ["Weekly", "Daily", "Monthly"], index=0)
-        with c2:
-            normalize_pct = st.checkbox("Normalize to % per bin", value=True,
-                                        help="Shows each idea as a percent of total in that time bin.")
-        with c3:
-            smooth_window = st.number_input("Rolling window (bins)", min_value=1, max_value=12, value=3,
-                                            help="Applies a rolling average over this many bins. 1 = no smoothing.")
-
-        # Date range + min bin size
-        df_time = dfc.copy()
-        df_time["Date"] = pd.to_datetime(df_time["Date"], errors="coerce")
-        df_time = df_time.dropna(subset=["Date"])
-        if df_time.empty:
+        # Parse dates and bound range
+        dfc["Date"] = pd.to_datetime(dfc["Date"], errors="coerce")
+        dfc = dfc.dropna(subset=["Date"])
+        if dfc.empty:
             st.info("No valid dates after parsing.")
             st.stop()
 
-        min_date = df_time["Date"].min().date()
-        max_date = df_time["Date"].max().date()
-        default_start = max_date - pd.Timedelta(days=180)
-        start, end = st.date_input("Date range", (max(default_start, min_date), max_date),
+        min_date = dfc["Date"].min().date()
+        max_date = dfc["Date"].max().date()
+
+        # Heuristic bin default: small range->Daily, medium->Weekly, big->Monthly
+        days_span = (max_date - min_date).days or 1
+        default_bin = "Daily" if days_span <= 45 else ("Weekly" if days_span <= 400 else "Monthly")
+
+        c1, c2, c3 = st.columns([1,1,1])
+        with c1:
+            bin_choice = st.selectbox("Time bin", ["Daily","Weekly","Monthly"],
+                                      index=["Daily","Weekly","Monthly"].index(default_bin))
+        with c2:
+            normalize_pct = st.checkbox("Normalize to % per bin", value=True)
+        with c3:
+            smooth_window = st.number_input("Rolling window (bins)", 1, 12, 3)
+
+        # Date range + min bin size
+        default_start = max_date - pd.Timedelta(days=min(180, days_span))
+        start, end = st.date_input("Date range",
+                                   (max(default_start, min_date), max_date),
                                    min_value=min_date, max_value=max_date)
+        min_bin_size = st.number_input("Hide bins with < N items", 1, 100, 4)
 
-        min_bin_size = st.number_input("Hide bins with < N items", min_value=1, max_value=100, value=5)
+        # Filter to date range
+        mask = (dfc["Date"].dt.date >= start) & (dfc["Date"].dt.date <= end)
+        dfT = dfc.loc[mask].copy()
 
-        # Filter by date range
-        mask = (df_time["Date"].dt.date >= start) & (df_time["Date"].dt.date <= end)
-        df_time = df_time[mask].copy()
+        # Build bin column
+        def make_bin(df, choice):
+            if choice == "Daily":
+                return df["Date"].dt.floor("D")
+            if choice == "Weekly":
+                return df["Date"].dt.to_period("W").apply(lambda r: r.start_time)
+            return df["Date"].dt.to_period("M").dt.to_timestamp()
 
-        # Build bin
-        if bin_choice == "Weekly":
-            df_time["Bin"] = df_time["Date"].dt.to_period("W").apply(lambda r: r.start_time)
-        elif bin_choice == "Daily":
-            df_time["Bin"] = df_time["Date"].dt.floor("D")
+        # Try chosen bin; if everything gets filtered out, auto-fallback to looser settings
+        tried = []
+        for choice in [bin_choice, "Weekly", "Monthly"]:
+            if choice in tried: 
+                continue
+            tried.append(choice)
+            dfT["Bin"] = make_bin(dfT, choice)
+            tl = (dfT.groupby(["Bin","Label"]).size()
+                      .reset_index(name="Count")
+                      .sort_values(["Bin","Label"]))
+            if tl.empty:
+                continue
+            totals = tl.groupby("Bin")["Count"].transform("sum")
+            tl2 = tl[totals >= min_bin_size].copy()
+            if not tl2.empty:
+                bin_choice = choice
+                timeline = tl2
+                break
         else:
-            df_time["Bin"] = df_time["Date"].dt.to_period("M").dt.to_timestamp()
-
-        # Counts per bin + Label
-        timeline = (df_time.groupby(["Bin","Label"]).size()
-                              .reset_index(name="Count")
-                              .sort_values(["Bin","Label"]))
-
-        if timeline.empty:
-            st.info("No data in the selected range.")
+            st.info("All bins filtered out. Lower the threshold or widen the date range.")
             st.stop()
 
-        # Drop bins with too few total items (prevents 100% spikes from bins of size 1)
-        totals = timeline.groupby("Bin")["Count"].transform("sum")
-        timeline = timeline[totals >= min_bin_size].copy()
-
-        if timeline.empty:
-            st.info("All bins filtered out by the 'Hide bins with < N items' threshold. Lower it or widen the date range.")
-            st.stop()
-
-        # Normalize to % per bin (optional)
+        # Normalize or keep counts
         if normalize_pct:
             totals = timeline.groupby("Bin")["Count"].transform("sum").replace(0, pd.NA)
             timeline["Value"] = (timeline["Count"] / totals) * 100
-            y_label = "Percent of bin (%)"
-            title_suffix = "(%)"
+            ylab, suffix = "Percent of bin (%)", "(%)"
         else:
             timeline["Value"] = timeline["Count"].astype(float)
-            y_label = "Posts"
-            title_suffix = "(counts)"
+            ylab, suffix = "Posts", "(counts)"
 
-        # Rolling smoothing per Label (optional)
+        # Rolling smoothing per label
         if smooth_window > 1:
             timeline = (timeline.sort_values(["Label","Bin"])
-                                 .groupby("Label", group_keys=False)
-                                 .apply(lambda d: d.assign(
-                                     Value=d["Value"].rolling(smooth_window, min_periods=1).mean()
-                                 )))
+                                .groupby("Label", group_keys=False)
+                                .apply(lambda d: d.assign(
+                                    Value=d["Value"].rolling(smooth_window, min_periods=1).mean()
+                                )))
 
-        fig_t = px.line(timeline, x="Bin", y="Value", color="Label",
-                        title=f"Timeline — {bin_choice} {title_suffix}",
-                        markers=True)
-        fig_t.update_layout(yaxis_title=y_label, xaxis_title="Time",
-                            legend_title_text="Idea", template="plotly_white")
-        st.plotly_chart(fig_t, width="stretch")
+        fig = px.line(timeline, x="Bin", y="Value", color="Label",
+                      title=f"Timeline — {bin_choice} {suffix}", markers=True)
+        fig.update_layout(yaxis_title=ylab, xaxis_title="Time",
+                          legend_title_text="Idea", template="plotly_white")
+        st.plotly_chart(fig, width="stretch")
 
-        # Download
         st.download_button("Download timeline data (CSV)",
                            timeline.to_csv(index=False).encode("utf-8"),
                            "timeline.csv", "text/csv")
-
