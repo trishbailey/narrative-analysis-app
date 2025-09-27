@@ -11,6 +11,7 @@ from collections import Counter
 import openai
 import os
 import io
+from streamlit_confetti import run_confetti
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto
@@ -441,6 +442,7 @@ if st.button("Run clustering"):
         st.session_state["narratives"] = narratives
         st.session_state["narratives_generated"] = True
     st.success("Clustering and narrative generation complete.")
+    run_confetti()  # Trigger confetti burst
 
 # --- Custom Color Palette ---
 COLOR_PALETTE = [
@@ -759,7 +761,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 title="Poster-Narrative Correlation (Post Counts)",
                 color_continuous_scale="Viridis",
                 aspect="auto",
-                text_auto=True,  # Add text annotations on cells
+                text_auto=True,
                 height=600
             )
             fig_correlation.update_layout(
