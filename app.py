@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 import re
 import datetime as _dt
 from sklearn.metrics.pairwise import cosine_similarity
@@ -17,6 +18,32 @@ from narrative.narrative_cluster import run_kmeans, attach_clusters
 
 # --- Page setup ---
 st.set_page_config(page_title="Narrative Analysis", layout="wide")
+
+# Custom CSS for a polished look
+st.markdown("""
+    <style>
+    .main .block-container {
+        padding: 2rem;
+        background-color: #f7f9fc;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    h1, h2, h3 {
+        font-family: 'Roboto', sans-serif;
+        color: #1a3c6d;
+    }
+    .stButton>button {
+        background-color: #1a3c6d;
+        color: white;
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+    }
+    .stButton>button:hover {
+        background-color: #2e5aa8;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("Narrative Analysis")
 
 # --- API Setup ---
@@ -178,6 +205,12 @@ if st.button("Run clustering"):
         st.session_state["narratives_generated"] = True
     st.success("Clustering and narrative generation complete.")
 
+# --- Custom Color Palette ---
+COLOR_PALETTE = [
+    '#1a3c6d', '#2e5aa8', '#4a90e2', '#7ab2ff', '#a3c6ff',
+    '#6b2d5c', '#9b59b6', '#c39bd3', '#d7bde2', '#e8d8f0'
+]
+
 # --- Main Display ---
 if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and "narratives_generated" in st.session_state:
     dfc = st.session_state["df"].copy()
@@ -197,8 +230,58 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     volume_data.columns = ["Cluster", "Volume"]
     volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
     st.subheader("Narrative Volumes")
-    fig_volumes = px.bar(volume_data, x="Narrative", y="Volume", title="Narrative Volumes")
-    fig_volumes.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Volume") # Horizontal labels
+    fig_volumes = px.bar(
+        volume_data,
+        x="Narrative",
+        y="Volume",
+        title="Narrative Volumes",
+        color="Narrative",
+        color_discrete_sequence=COLOR_PALETTE
+    )
+    # Enhance bar chart
+    fig_volumes.update_traces(
+        marker=dict(
+            line=dict(width=1, color='#ffffff'),
+            opacity=0.9
+        ),
+        text=volume_data["Volume"],
+        textposition='auto'
+    )
+    fig_volumes.update_layout(
+        font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
+        title=dict(text="Narrative Volumes", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
+        xaxis=dict(
+            title="Narrative",
+            tickangle=0,
+            title_font=dict(size=14),
+            tickfont=dict(size=12)
+        ),
+        yaxis=dict(
+            title="Volume",
+            title_font=dict(size=14),
+            tickfont=dict(size=12),
+            gridcolor="rgba(0,0,0,0.1)"
+        ),
+        plot_bgcolor="rgba(247,249,252,0.8)",
+        paper_bgcolor="rgba(255,255,255,0)",
+        showlegend=True,
+        margin=dict(l=50, r=50, t=80, b=50),
+        hovermode="closest",
+        hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
+    )
+    # Add annotation for highest volume
+    max_volume = volume_data["Volume"].max()
+    max_narrative = volume_data[volume_data["Volume"] == max_volume]["Narrative"].iloc[0]
+    fig_volumes.add_annotation(
+        x=max_narrative,
+        y=max_volume,
+        text=f"Peak: {max_volume}",
+        showarrow=True,
+        arrowhead=2,
+        ax=20,
+        ay=-30,
+        font=dict(size=12, color="#1a3c6d")
+    )
     st.plotly_chart(fig_volumes, use_container_width=True)
     # Timeline of Narratives (Volume Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
@@ -208,6 +291,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         max_date = dfc[date_column].max()
         span_days = (max_date - min_date).days if pd.notnull(min_date) and pd.notnull(max_date) else 0
         if span_days > 0:
+            # Adaptive frequency based on time span
             if span_days <= 3:
                 freq = 'D'
             elif span_days < 7:
@@ -231,19 +315,60 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             try:
                 timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq=freq)]).size().reset_index(name="Volume")
                 timeline_data["Narrative"] = timeline_data["Cluster"].map(short_labels_map)
-                st.subheader("Narrative Trends Over Time")
+                st.subheader("Trends Over Time")
                 fig_timeline = px.line(
                     timeline_data,
                     x=date_column,
                     y="Volume",
                     color="Narrative",
-                    title="Narrative Trends Over Time",
+                    title="Trends Over Time",
                     labels={"Volume": "Post Count", date_column: x_title},
-                    markers=True
+                    markers=True,
+                    line_shape='spline'
                 )
-                fig_timeline.update_yaxes(
-                    title="Number of Posts",
-                    tickformat="d"  # Ensure integer ticks for counts
+                # Enhance line chart
+                fig_timeline.update_traces(
+                    line=dict(width=3),
+                    marker=dict(size=8, line=dict(width=1, color='#ffffff')),
+                    mode='lines+markers',
+                    fill='tozeroy',
+                    fillcolor='rgba(0,0,0,0.05)'
+                )
+                fig_timeline.update_layout(
+                    font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
+                    title=dict(text="Trends Over Time", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
+                    xaxis=dict(
+                        title=x_title,
+                        title_font=dict(size=14),
+                        tickfont=dict(size=12),
+                        gridcolor="rgba(0,0,0,0.1)"
+                    ),
+                    yaxis=dict(
+                        title="Number of Posts",
+                        title_font=dict(size=14),
+                        tickfont=dict(size=12),
+                        gridcolor="rgba(0,0,0,0.1)",
+                        tickformat="d"
+                    ),
+                    plot_bgcolor="rgba(247,249,252,0.8)",
+                    paper_bgcolor="rgba(255,255,255,0)",
+                    showlegend=True,
+                    margin=dict(l=50, r=50, t=80, b=50),
+                    hovermode="x unified",
+                    hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto"),
+                    color_discrete_sequence=COLOR_PALETTE
+                )
+                # Add annotation for highest volume point
+                max_volume_row = timeline_data.loc[timeline_data["Volume"].idxmax()]
+                fig_timeline.add_annotation(
+                    x=max_volume_row[date_column],
+                    y=max_volume_row["Volume"],
+                    text=f"Peak: {max_volume_row['Volume']}",
+                    showarrow=True,
+                    arrowhead=2,
+                    ax=20,
+                    ay=-30,
+                    font=dict(size=12, color="#1a3c6d")
                 )
                 st.plotly_chart(fig_timeline, use_container_width=True)
             except KeyError:
