@@ -194,7 +194,7 @@ st.set_page_config(page_title="Narrative Analysis", layout="wide")
 st.markdown("""
     <style>
     .main .block-container {
-        Великобітанія: 2rem;
+        padding: 2rem;
         background: linear-gradient(to bottom, #f7f9fc, #e3e9f2);
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
@@ -498,7 +498,8 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         y="Volume",
         title="Narrative Volumes",
         color="Narrative",
-        color_discrete_sequence=COLOR_PALETTE
+        color_discrete_sequence=COLOR_PALETTE,
+        text="Narrative"  # Use Narrative as text for wrapping
     )
     # Enhance bar chart
     fig_volumes.update_traces(
@@ -506,17 +507,19 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             line=dict(width=1, color='#ffffff'),
             opacity=0.9
         ),
-        text=volume_data["Volume"],
-        textposition='auto'
+        textposition='auto'  # Automatically position text to avoid overlap
     )
     fig_volumes.update_layout(
         font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
         title=dict(text="Narrative Volumes", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
         xaxis=dict(
             title="Narrative",
-            tickangle=0,
+            tickangle=45,  # Rotate labels 45 degrees for better readability
             title_font=dict(size=14),
-            tickfont=dict(size=12)
+            tickfont=dict(size=10),  # Slightly smaller font to fit wrapped text
+            tickmode="array",  # Ensure all labels are displayed
+            tickvals=volume_data["Narrative"],  # Match tick values to narrative labels
+            ticktext=volume_data["Narrative"].apply(lambda x: "<br>".join(x.split()) if len(x.split()) > 2 else x)  # Wrap long labels with <br>
         ),
         yaxis=dict(
             title="Volume",
