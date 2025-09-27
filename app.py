@@ -107,6 +107,59 @@ else:
 # Show a quick preview (whatever is in state now)
 st.dataframe(st.session_state["df"].head(20), width="stretch")
 
+# ---------------------------
+# Assign to existing ideas (nearest-centroid)
+# ---------------------------
+from sklearn.metrics.pairwise import cosine_similarity
+
+st.subheader("Assign to existing ideas (baseline)")
+
+if "baseline" not in st.session_state:
+    st.info("No baseline saved yet. First: cluster + name ideas, then click 'Save baseline'.")
+elif "df" not in st.session_state:
+    st.info("Load a dataset to assign.")
+else:
+    df_in = st.session_state["df"]
+    base = st.session_state["baseline"]
+
+    # Controls
+    sim_threshold = st.slider(
+        "Minimum similarity to assign", 0.20, 0.80, 0.35, 0.01,
+        help="Items below this cosine similarity will be marked as Unassigned."
+    )
+    assign_btn = st.button("Assign to baseline ideas")
+
+    if assign_btn:
+        with st.spinner("Embedding and assigning to ideas..."):
+            emb = st.session_state.get("embeddings")
+            if emb is None or len(emb) != len(df_in):
+                emb = embed_df_texts(df_in)
+                st.session_state["embeddings"] = emb
+
+            # Compute nearest centroid
+            C = base["centroids"]                  # [n_ideas x dim]
+            L = np.array(base["labels"])           # [n_ideas]
+            sims = cosine_similarity(emb, C)       # [n_items x n_ideas]
+            best_idx = sims.argmax(axis=1)
+            best_sim = sims.max(axis=1)
+            assigned_labels = np.where(best_sim >= sim_threshold, L[best_idx], "Unassigned")
+
+            # Write back; also give numeric codes so downstream sections work
+            label_to_int = {lab: i for i, lab in enumerate(L)}
+            df_out = df_in.copy()
+            df_out["Label"] = assigned_labels.astype(str)
+            df_out["Cluster"] = [label_to_int.get(lab, -1) for lab in df_out["Label"]]
+
+            st.session_state["df"] = df_out
+            st.session_state["assigned_from_baseline"] = True
+
+        # Quick summary
+        counts = (df_out["Label"].value_counts()
+                  .rename_axis("Idea").reset_index(name="Count")
+                  .sort_values("Idea"))
+        st.success("Assigned to existing ideas.")
+        st.dataframe(counts, width="stretch")
+
 
 # ---------------------------
 # Embeddings (cached)
@@ -189,6 +242,56 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
     st.session_state["df"] = dfc
 else:
     st.info("Run clustering in the sidebar to name your clusters.")
+
+# ---------------------------
+# Freeze current ideas as a baseline (centroids)
+# ---------------------------
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+import datetime as _dt
+
+st.subheader("Freeze ideas as baseline")
+
+if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
+    dfc = st.session_state["df"]
+
+    # We store: labels[] and centroids [n_ideas x dim]
+    if st.button("Save baseline (use these ideas for future datasets)"):
+        # Ensure embeddings exist
+        emb = st.session_state.get("embeddings")
+        if emb is None or len(emb) != len(dfc):
+            emb = embed_df_texts(dfc)
+            st.session_state["embeddings"] = emb
+
+        # Use human labels if present, else fall back to cluster ids as strings
+        if "Label" not in dfc.columns:
+            dfc["Label"] = dfc["Cluster"].astype(str)
+
+        labels = []
+        centroids = []
+        for lab in sorted(dfc["Label"].unique()):
+            idx = np.where(dfc["Label"].values == lab)[0]
+            if len(idx) == 0:
+                continue
+            labels.append(lab)
+            centroids.append(emb[idx].mean(axis=0))
+        if centroids:
+            st.session_state["baseline"] = {
+                "labels": labels,
+                "centroids": np.vstack(centroids),
+                "created": _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            }
+            st.success(f"Baseline saved with {len(labels)} ideas.")
+        else:
+            st.warning("Could not compute centroids (no items).")
+
+    # Optional: clear baseline
+    if "baseline" in st.session_state:
+        if st.button("Clear baseline"):
+            st.session_state.pop("baseline", None)
+            st.success("Baseline cleared.")
+else:
+    st.info("Run clustering and name your ideas before saving a baseline.")
 
 # ---------------------------
 # Results: cluster counts + top terms (using labels)
