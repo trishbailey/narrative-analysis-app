@@ -29,7 +29,7 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .stSidebar {
-        background-color: #9ca3af; /* Lighter gray sidebar for improved readability */
+        background-color: #d1d5db; /* Much lighter gray sidebar for improved readability */
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
