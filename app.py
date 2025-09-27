@@ -17,13 +17,13 @@ from narrative.narrative_io import read_csv_auto
 from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
 from narrative.narrative_cluster import run_kmeans, attach_clusters
 
-# --- Modified normalize_to_canonical to preserve Influencer and Twitter Screen Name ---
+# --- Modified normalize_to_canonical to preserve Influencer, Twitter Screen Name, and engagement metrics ---
 def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize a raw DataFrame to the canonical columns:
-    Title, Snippet, (optional) Date, URL, author, display_name.
+    Title, Snippet, (optional) Date, URL, author, display_name, Likes, Retweets, Replies, Comments, Shares, Reactions.
     Handles Meltwater X columns like Opening Text / Hit Sentence / Parent URL / Alternate Date Format / Time.
-    Preserves Influencer as author and Twitter Screen Name as display_name.
+    Preserves Influencer as author, Twitter Screen Name as display_name, and engagement metrics.
     """
     # Map normalized -> original names
     norm2orig: dict[str, str] = {}
@@ -40,7 +40,13 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
         "date": ["date", "published", "pubdate", "time", "created", "created_iso", "created_utc", "alternatedateformat"],
         "url": ["url", "link", "permalink", "parenturl"],
         "author": ["author", "influencer"],
-        "display_name": ["twitter screen name"]
+        "display_name": ["twitter screen name"],
+        "likes": ["likes", "Likes"],
+        "retweets": ["retweets", "Retweets"],
+        "replies": ["replies", "Replies"],
+        "comments": ["comments", "Comments"],
+        "shares": ["shares", "Shares"],
+        "reactions": ["reactions", "Reactions"]
     }
 
     # Identify common fields
@@ -50,6 +56,12 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
     url_key = next((k for k in ALIASES["url"] if k in norm2orig), None)
     author_key = next((k for k in ALIASES["author"] if k in norm2orig), None)
     display_name_key = next((k for k in ALIASES["display_name"] if k in norm2orig), None)
+    likes_key = next((k for k in ALIASES["likes"] if k in norm2orig), None)
+    retweets_key = next((k for k in ALIASES["retweets"] if k in norm2orig), None)
+    replies_key = next((k for k in ALIASES["replies"] if k in norm2orig), None)
+    comments_key = next((k for k in ALIASES["comments"] if k in norm2orig), None)
+    shares_key = next((k for k in ALIASES["shares"] if k in norm2orig), None)
+    reactions_key = next((k for k in ALIASES["reactions"] if k in norm2orig), None)
 
     # --- MELTWATER-SPECIFIC TITLE/SNIPPET LOGIC ---
     headline = norm2orig.get("headline")
@@ -130,6 +142,14 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
     # Build Display Name (Twitter Screen Name)
     display_name_series = df_raw[norm2orig[display_name_key]].fillna("").astype(str).str.strip() if display_name_key else pd.Series([""] * len(df_raw), dtype=object)
 
+    # Build Engagement Columns
+    likes_series = df_raw[norm2orig[likes_key]].fillna(0).astype(float) if likes_key else pd.Series([0] * len(df_raw), dtype=float)
+    retweets_series = df_raw[norm2orig[retweets_key]].fillna(0).astype(float) if retweets_key else pd.Series([0] * len(df_raw), dtype=float)
+    replies_series = df_raw[norm2orig[replies_key]].fillna(0).astype(float) if replies_key else pd.Series([0] * len(df_raw), dtype=float)
+    comments_series = df_raw[norm2orig[comments_key]].fillna(0).astype(float) if comments_key else pd.Series([0] * len(df_raw), dtype=float)
+    shares_series = df_raw[norm2orig[shares_key]].fillna(0).astype(float) if shares_key else pd.Series([0] * len(df_raw), dtype=float)
+    reactions_series = df_raw[norm2orig[reactions_key]].fillna(0).astype(float) if reactions_key else pd.Series([0] * len(df_raw), dtype=float)
+
     # Assemble canonical DataFrame
     df = pd.DataFrame({
         "Title": title_series,
@@ -137,7 +157,13 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
         "Date": date_series,
         "URL": url_series,
         "author": author_series,
-        "display_name": display_name_series
+        "display_name": display_name_series,
+        "Likes": likes_series,
+        "Retweets": retweets_series,
+        "Replies": replies_series,
+        "Comments": comments_series,
+        "Shares": shares_series,
+        "Reactions": reactions_series
     })
 
     # Clean rows: require either Title or Snippet
@@ -305,9 +331,7 @@ try:
     if uploaded is not None:
         raw = read_csv_auto(uploaded)
         if raw is not None:
-            st.write(f"Raw DataFrame columns: {raw.columns.tolist()}")
             df = normalize_to_canonical(raw)
-            st.write(f"Normalized DataFrame columns: {df.columns.tolist()}")
 except Exception as e:
     error = str(e)
 
@@ -573,12 +597,12 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         # Compute top 10 by volume
         volume_by_author = dfc.groupby(['author', 'display_label']).size().reset_index(name='Volume').nlargest(10, 'Volume')
         # Compute top 10 by engagement
-        engagement_cols = [col for col in ['likes', 'reposts', 'replies', 'Likes', 'Reposts', 'Retweets', 'Comments', 'Shares', 'Reactions'] if col in dfc.columns]
+        engagement_cols = [col for col in ['Likes', 'Retweets', 'Replies', 'Comments', 'Shares', 'Reactions'] if col in dfc.columns]
         if engagement_cols:
             engagement_by_author = dfc.groupby(['author', 'display_label'])[engagement_cols].sum().sum(axis=1).reset_index(name='Engagement').nlargest(10, 'Engagement')
         else:
             engagement_by_author = pd.DataFrame({'author': [], 'display_label': [], 'Engagement': []})
-            st.warning("No engagement columns (likes, reposts, replies, Likes, Reposts, Retweets, Comments, Shares, Reactions) found in dataset. Engagement chart skipped.")
+            st.warning("No engagement columns (Likes, Retweets, Replies, Comments, Shares, Reactions) found in dataset. Engagement chart skipped.")
         
         # Display table of top posters
         if not volume_by_author.empty:
