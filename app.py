@@ -11,7 +11,7 @@ from collections import Counter
 import openai
 import os
 import io
-from streamlit_confetti import streamlit_confetti
+from streamlit_confetti import st_confetti
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto
@@ -107,8 +107,7 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
     def _parse_meltwater_datetime(df: pd.DataFrame, norm2orig: dict) -> pd.Series:
         def _coerce(s: pd.Series) -> pd.Series:
             s = s.astype(str).str.replace(r'(?i)(am|pm)$', r' \1', regex=True)
-            # Specify format to handle Meltwater dates like '15-Sep-2025 02:55PM'
-            return pd.to_datetime(s, errors="coerce", format="%d-%b-%Y %I:%M%p", dayfirst=True)
+            return pd.to_datetime(s, errors="coerce", dayfirst=True)
         date_col = norm2orig.get("date")
         alt_col = norm2orig.get("alternatedateformat")
         time_col = norm2orig.get("time")
@@ -443,7 +442,7 @@ if st.button("Run clustering"):
         st.session_state["narratives"] = narratives
         st.session_state["narratives_generated"] = True
     st.success("Clustering and narrative generation complete.")
-    streamlit_confetti()  # Trigger confetti burst
+    st_confetti()  # Trigger confetti burst
 
 # --- Custom Color Palette ---
 COLOR_PALETTE = [
