@@ -191,37 +191,42 @@ from narrative.narrative_summarize import summarize_narratives
 
 st.subheader("Auto-label ideas")
 
-if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
+if ("df" in st.session_state) and ("Cluster" in st.session_state["df"].columns):
     dfc = st.session_state["df"].copy()
 
+    # Ensure embeddings exist
     emb = st.session_state.get("embeddings")
-    if emb is None or len(emb) != len(dfc):
+    if (emb is None) or (len(emb) != len(dfc)):
         emb = embed_df_texts(dfc)
         st.session_state["embeddings"] = emb
 
-    # Build one-liners first
+    # Build one-liners first (use cluster ids as the grouping key)
     narr_df = summarize_narratives(dfc, emb, label_col="Cluster", topk_central=5)
-    # Create short labels from narratives (first 5 content words)
+
+    # Create short labels from narratives (first few informative words)
     STOP = {
         "the","a","an","and","or","for","to","of","in","on","at","with","by","after","before","from",
         "is","are","was","were","be","been","being","it","its","this","that","these","those","as",
         "over","under","about","into","out","up","down","than","then","but","so","if","while","when",
         "you","we","they","he","she","i"
     }
-def short_label(s: str, max_words=5) -> str:
-    s = str(s or "")
-    toks = re.sub(r"[^A-Za-z0-9\s]", " ", s).lower().split()
-    kept = [w for w in toks if w not in STOP]
-    return (" ".join(kept[:max_words]) or "idea").title()
+    def short_label(s: str, max_words: int = 5) -> str:
+        s = str(s or "")
+        toks = re.sub(r"[^A-Za-z0-9\s]", " ", s).lower().split()
+        kept = [w for w in toks if w not in STOP]
+        return (" ".join(kept[:max_words]) or "idea").title()
 
-    # Map cluster id -> label via narrative row order
-    # narr_df's "Idea" is str of cluster id because we passed label_col="Cluster"
+    # Map cluster id -> label via narrative rows
     labels_map = {}
     used = set()
     for _, r in narr_df.iterrows():
-        cid = int(r["Idea"])
-        base = short_label(r["Narrative"])
-        label = base
+        # narr_df["Idea"] is the cluster id as string because we passed label_col="Cluster"
+        try:
+            cid = int(r["Idea"])
+        except Exception:
+            continue
+        base = short_label(r.get("Narrative", ""))
+        label = base or f"Idea {cid}"
         n = 2
         while label in used:
             label = f"{base} #{n}"
@@ -229,10 +234,12 @@ def short_label(s: str, max_words=5) -> str:
         used.add(label)
         labels_map[cid] = label
 
+    # Apply and persist
     dfc["Label"] = dfc["Cluster"].map(labels_map).astype(str)
     st.session_state["labels"] = labels_map
     st.session_state["df"] = dfc
 
+    # Show mapping table
     st.dataframe(
         pd.DataFrame(
             {"Cluster": sorted(labels_map.keys()),
