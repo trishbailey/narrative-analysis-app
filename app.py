@@ -634,7 +634,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     if 'author' in dfc.columns:
         # Create display label combining display_name and author
         dfc['display_label'] = dfc.apply(
-            lambda x: f"{x['display_name']} ({x['author']})" if pd.notnull(x.get('display_name')) and x['display_name'] else x['author'],
+            lambda x: f"{x['display_name']} ({x['author']})"[:40] if pd.notnull(x.get('display_name')) and x['display_name'] else x['author'][:40],
             axis=1
         )
         
@@ -647,15 +647,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         else:
             engagement_by_author = pd.DataFrame({'author': [], 'display_label': [], 'Engagement': []})
             st.warning("No engagement columns (Likes, Retweets, Replies, Comments, Shares, Reactions) found in dataset. Engagement chart skipped.")
-        
-        # Display table of top posters
-        if not volume_by_author.empty:
-            table_data = volume_by_author[['display_label', 'Volume']].merge(
-                engagement_by_author[['display_label', 'Engagement']], on='display_label', how='outer'
-            ).fillna({'Volume': 0, 'Engagement': 0})
-            table_data.columns = ['Poster', 'Volume (Posts)', 'Engagement (Likes + Reposts + Replies)']
-            st.write("**Top Posters Table**")
-            st.dataframe(table_data, use_container_width=True)
         
         # Create two-column layout for bar charts
         col1, col2 = st.columns(2)
@@ -679,8 +670,8 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             fig_volume_authors.update_layout(
                 font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
                 title=dict(text="Top 10 Posters by Volume", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
-                xaxis=dict(title="Post Count", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="rgba(0,0,0,0.1)"),
-                yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=12)),
+                xaxis=dict(title="Post Count", title_font=dict(size=14), tickfont=dict(size=14)),
+                yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=14)),
                 plot_bgcolor="rgba(247,249,252,0.8)",
                 paper_bgcolor="rgba(255,255,255,0)",
                 showlegend=False,
@@ -723,8 +714,8 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 fig_engagement_authors.update_layout(
                     font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
                     title=dict(text="Top 10 Posters by Engagement", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
-                    xaxis=dict(title="Engagement (Likes + Reposts + Replies)", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="rgba(0,0,0,0.1)"),
-                    yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=12)),
+                    xaxis=dict(title="Engagement (Likes + Reposts + Replies)", title_font=dict(size=14), tickfont=dict(size=14)),
+                    yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=14)),
                     plot_bgcolor="rgba(247,249,252,0.8)",
                     paper_bgcolor="rgba(255,255,255,0)",
                     showlegend=False,
@@ -766,14 +757,16 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 correlation_data,
                 labels=dict(x="Narrative", y="Poster", color="Post Count"),
                 title="Poster-Narrative Correlation (Post Counts)",
-                color_continuous_scale="RdBu",
-                aspect="auto"
+                color_continuous_scale="Viridis",
+                aspect="auto",
+                text_auto=True,  # Add text annotations on cells
+                height=600
             )
             fig_correlation.update_layout(
                 font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
                 title=dict(text="Poster-Narrative Correlation (Post Counts)", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
-                xaxis=dict(title="Narrative", title_font=dict(size=14), tickfont=dict(size=12), tickangle=45),
-                yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=12)),
+                xaxis=dict(title="Narrative", title_font=dict(size=14), tickfont=dict(size=14), tickangle=45),
+                yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=14)),
                 plot_bgcolor="rgba(247,249,252,0.8)",
                 paper_bgcolor="rgba(255,255,255,0)",
                 margin=dict(l=50, r=50, t=80, b=50),
@@ -802,7 +795,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         st.warning("No 'author' or 'Influencer' column found in dataset. Poster-theme correlation skipped. Ensure your CSV includes an 'Influencer' column.")
 
     # Wut Means? Key Takeaways
-    st.subheader("Wut Means? Key Takeaways 🤔")
+    st.subheader("Wut Means? 🤔 Key Takeaways")
     if narratives and not volume_data.empty:
         takeaways = llm_key_takeaways(
             narratives,
