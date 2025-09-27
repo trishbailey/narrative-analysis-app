@@ -14,6 +14,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import re
 import datetime as _dt
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -207,10 +208,11 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
         "over","under","about","into","out","up","down","than","then","but","so","if","while","when",
         "you","we","they","he","she","i"
     }
-    def short_label(s: str, max_words=5) -> str:
-        toks = re.sub(r"[^A-Za-z0-9\s]", " ", s).lower().split()
-        kept = [w for w in toks if w not in STOP]
-        return (" ".join(kept[:max_words]) or "idea").title()
+def short_label(s: str, max_words=5) -> str:
+    s = str(s or "")
+    toks = re.sub(r"[^A-Za-z0-9\s]", " ", s).lower().split()
+    kept = [w for w in toks if w not in STOP]
+    return (" ".join(kept[:max_words]) or "idea").title()
 
     # Map cluster id -> label via narrative row order
     # narr_df's "Idea" is str of cluster id because we passed label_col="Cluster"
