@@ -139,50 +139,102 @@ dfc = st.session_state["df"]
 embeddings = st.session_state.get("embeddings", None)
 
 # ---------------------------
-# Results: cluster counts + top terms
+# Name your clusters as "ideas"
+# ---------------------------
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+st.subheader("Name your clusters (ideas)")
+
+if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
+    dfc = st.session_state["df"]
+
+    # Create (or reuse) a label map in session state
+    if "labels" not in st.session_state:
+        st.session_state["labels"] = {}  # {cluster_id: "Idea label"}
+
+    # Ensure normalized text + embeddings so we can show exemplars
+    df_norm = ensure_text_column(dfc)
+    emb = st.session_state.get("embeddings")
+    if emb is None:
+        emb = embed_df_texts(dfc)
+        st.session_state["embeddings"] = emb
+
+    # Build quick top-terms per cluster (comma-joined)
+    terms_df = cluster_terms_dataframe(df_norm, n_terms=8)
+    terms_map = {int(r.Cluster): r.TopTerms for _, r in terms_df.iterrows()}
+
+    # Show 3 representative titles (closest to centroid) for each cluster
+    for cid in sorted(dfc["Cluster"].unique()):
+        idx = np.where(dfc["Cluster"].values == cid)[0]
+        if len(idx) == 0:
+            continue
+        centroid = emb[idx].mean(axis=0, keepdims=True)
+        sims = cosine_similarity(centroid, emb[idx]).ravel()
+        top_k = idx[sims.argsort()[::-1][:3]]
+        exemplars = " | ".join(dfc.iloc[top_k]["Title"].tolist())
+
+        default_label = st.session_state["labels"].get(cid, f"Idea {cid}")
+        st.write(f"**Cluster {cid}** — Top terms: _{terms_map.get(int(cid), '')}_")
+        new_label = st.text_input(
+            f"Label for cluster {cid}",
+            value=default_label,
+            key=f"label_{cid}"
+        )
+        st.caption(f"Examples: {exemplars}")
+        st.session_state["labels"][cid] = new_label.strip() or f"Idea {cid}"
+
+    # Apply labels to df and keep it in state
+    dfc["Label"] = dfc["Cluster"].map(st.session_state["labels"]).astype(str)
+    st.session_state["df"] = dfc
+else:
+    st.info("Run clustering in the sidebar to name your clusters.")
+
+# ---------------------------
+# Results: cluster counts + top terms (using labels)
 # ---------------------------
 st.subheader("Cluster results")
 
-# Local guards so this section doesn't stop the whole app
 if "df" not in st.session_state:
     st.info("Load data first.")
 else:
     dfc = st.session_state["df"]
-
     if "Cluster" not in dfc.columns:
         st.info("Run clustering in the sidebar to see cluster results.")
     else:
-        # Cluster sizes table + bar chart
-        counts = cluster_counts(dfc)
+        # Ensure Label column exists (from the naming section); fallback to cluster id strings
+        if "Label" not in dfc.columns:
+            dfc["Label"] = dfc["Cluster"].astype(str)
+
+        # Counts by label
+        counts = (dfc["Label"].value_counts()
+                  .sort_index()
+                  .rename_axis("Label").reset_index(name="Count"))
 
         left, right = st.columns([1, 2])
         with left:
-            st.dataframe(counts, use_container_width=True)
-
+            st.dataframe(counts, width="stretch")
         with right:
-            fig = px.bar(counts, x="Cluster", y="Count", title="Posts per Cluster")
-            st.plotly_chart(fig, use_container_width=True)
+            fig = px.bar(counts, x="Label", y="Count", title="Posts per Idea")
+            st.plotly_chart(fig, width="stretch")
 
-        # Top terms per cluster (TF-IDF)
-        st.subheader("Top terms per cluster (TF-IDF)")
-        df_norm = ensure_text_column(dfc)  # builds _text_norm if missing
+        # Top terms (TF-IDF) table (still computed by cluster; join label)
+        df_norm = ensure_text_column(dfc)
         terms_df = cluster_terms_dataframe(df_norm, n_terms=12)
-        st.dataframe(terms_df, use_container_width=True)
+        terms_df["Label"] = terms_df["Cluster"].map(
+            dfc.drop_duplicates("Cluster").set_index("Cluster")["Label"]
+        ).astype(str)
+        terms_df = terms_df[["Label", "TopTerms"]].sort_values("Label")
+        st.subheader("Top terms per idea (TF-IDF)")
+        st.dataframe(terms_df, width="stretch")
 
-        # Download buttons (cluster counts / top terms)
-        cc_csv = counts.to_csv(index=False).encode("utf-8")
-        tt_csv = terms_df.to_csv(index=False).encode("utf-8")
-        col_dl1, col_dl2 = st.columns(2)
-        with col_dl1:
-            st.download_button(
-                "Download cluster counts (CSV)",
-                cc_csv, "cluster_counts.csv", "text/csv"
-            )
-        with col_dl2:
-            st.download_button(
-                "Download top terms (CSV)",
-                tt_csv, "cluster_top_terms.csv", "text/csv"
-            )
+        # Downloads
+        st.download_button("Download idea counts (CSV)",
+                           counts.to_csv(index=False).encode("utf-8"),
+                           "idea_counts.csv", "text/csv")
+        st.download_button("Download idea terms (CSV)",
+                           terms_df.to_csv(index=False).encode("utf-8"),
+                           "idea_top_terms.csv", "text/csv")
 
 # ---------------------------
 # 2D Semantic Map (UMAP)
@@ -340,14 +392,10 @@ else:
             st.caption("Click **Compute sentiment** to score and summarize by cluster.")
 
 # ---------------------------
-# Timeline (counts or % by time bin)
+# Timeline (counts or % by time bin) — using idea labels and bin filters
 # ---------------------------
-import pandas as pd
-import plotly.express as px
-
 st.subheader("Timeline")
 
-# Local guards
 if "df" not in st.session_state:
     st.info("Load data first.")
 else:
@@ -358,70 +406,94 @@ else:
     elif "Cluster" not in dfc.columns:
         st.info("Run clustering in the sidebar to enable the timeline.")
     else:
+        # Labels fallback
+        if "Label" not in dfc.columns:
+            dfc["Label"] = dfc["Cluster"].astype(str)
+
         # Controls
-        col1, col2, col3 = st.columns([1,1,1])
-        with col1:
+        c1, c2, c3 = st.columns([1,1,1])
+        with c1:
             bin_choice = st.selectbox("Time bin", ["Weekly", "Daily", "Monthly"], index=0)
-        with col2:
+        with c2:
             normalize_pct = st.checkbox("Normalize to % per bin", value=True,
-                                        help="Shows each cluster as a percent of total in that time bin.")
-        with col3:
-            smooth_window = st.number_input("Rolling window (bins)", min_value=1, max_value=12, value=1,
+                                        help="Shows each idea as a percent of total in that time bin.")
+        with c3:
+            smooth_window = st.number_input("Rolling window (bins)", min_value=1, max_value=12, value=3,
                                             help="Applies a rolling average over this many bins. 1 = no smoothing.")
 
-        # Optional cluster filter
-        clusters_available = sorted(dfc["Cluster"].unique().tolist())
-        chosen = st.multiselect("Clusters to include", clusters_available, default=clusters_available)
-
-        # Build time bin
+        # Date range + min bin size
         df_time = dfc.copy()
         df_time["Date"] = pd.to_datetime(df_time["Date"], errors="coerce")
         df_time = df_time.dropna(subset=["Date"])
-        if not chosen:
-            st.warning("No clusters selected.")
+        if df_time.empty:
+            st.info("No valid dates after parsing.")
             st.stop()
-        df_time = df_time[df_time["Cluster"].isin(chosen)]
 
+        min_date = df_time["Date"].min().date()
+        max_date = df_time["Date"].max().date()
+        default_start = max_date - pd.Timedelta(days=180)
+        start, end = st.date_input("Date range", (max(default_start, min_date), max_date),
+                                   min_value=min_date, max_value=max_date)
+
+        min_bin_size = st.number_input("Hide bins with < N items", min_value=1, max_value=100, value=5)
+
+        # Filter by date range
+        mask = (df_time["Date"].dt.date >= start) & (df_time["Date"].dt.date <= end)
+        df_time = df_time[mask].copy()
+
+        # Build bin
         if bin_choice == "Weekly":
             df_time["Bin"] = df_time["Date"].dt.to_period("W").apply(lambda r: r.start_time)
         elif bin_choice == "Daily":
             df_time["Bin"] = df_time["Date"].dt.floor("D")
-        else:  # Monthly
+        else:
             df_time["Bin"] = df_time["Date"].dt.to_period("M").dt.to_timestamp()
 
-        # Counts per bin+cluster
-        timeline = (df_time.groupby(["Bin","Cluster"]).size()
+        # Counts per bin + Label
+        timeline = (df_time.groupby(["Bin","Label"]).size()
                               .reset_index(name="Count")
-                              .sort_values(["Bin","Cluster"]))
+                              .sort_values(["Bin","Label"]))
+
+        if timeline.empty:
+            st.info("No data in the selected range.")
+            st.stop()
+
+        # Drop bins with too few total items (prevents 100% spikes from bins of size 1)
+        totals = timeline.groupby("Bin")["Count"].transform("sum")
+        timeline = timeline[totals >= min_bin_size].copy()
+
+        if timeline.empty:
+            st.info("All bins filtered out by the 'Hide bins with < N items' threshold. Lower it or widen the date range.")
+            st.stop()
 
         # Normalize to % per bin (optional)
         if normalize_pct:
             totals = timeline.groupby("Bin")["Count"].transform("sum").replace(0, pd.NA)
             timeline["Value"] = (timeline["Count"] / totals) * 100
             y_label = "Percent of bin (%)"
+            title_suffix = "(%)"
         else:
             timeline["Value"] = timeline["Count"].astype(float)
             y_label = "Posts"
+            title_suffix = "(counts)"
 
-        # Rolling smoothing per cluster (optional)
+        # Rolling smoothing per Label (optional)
         if smooth_window > 1:
-            timeline = (timeline.sort_values(["Cluster","Bin"])
-                                 .groupby("Cluster", group_keys=False)
+            timeline = (timeline.sort_values(["Label","Bin"])
+                                 .groupby("Label", group_keys=False)
                                  .apply(lambda d: d.assign(
                                      Value=d["Value"].rolling(smooth_window, min_periods=1).mean()
                                  )))
 
-        # Plot
-        if timeline.empty:
-            st.info("No data after filtering. Try different clusters or bin size.")
-        else:
-            fig_t = px.line(timeline, x="Bin", y="Value", color="Cluster",
-                            title=f"Timeline — {bin_choice} ({'%' if normalize_pct else 'counts'})",
-                            markers=True)
-            fig_t.update_layout(yaxis_title=y_label, xaxis_title="Time", legend_title_text="Cluster",
-                                template="plotly_white")
-            st.plotly_chart(fig_t, use_container_width=True)
+        fig_t = px.line(timeline, x="Bin", y="Value", color="Label",
+                        title=f"Timeline — {bin_choice} {title_suffix}",
+                        markers=True)
+        fig_t.update_layout(yaxis_title=y_label, xaxis_title="Time",
+                            legend_title_text="Idea", template="plotly_white")
+        st.plotly_chart(fig_t, width="stretch")
 
-            # Download
-            dl_csv = timeline.to_csv(index=False).encode("utf-8")
-            st.download_button("Download timeline data (CSV)", dl_csv, "timeline.csv", "text/csv")
+        # Download
+        st.download_button("Download timeline data (CSV)",
+                           timeline.to_csv(index=False).encode("utf-8"),
+                           "timeline.csv", "text/csv")
+
