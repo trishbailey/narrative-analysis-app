@@ -24,6 +24,8 @@ from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_te
 from narrative.narrative_cluster import run_kmeans, attach_clusters
 from narrative.narrative_sentiment import add_vader_sentiment
 from narrative.narrative_summarize import summarize_narratives
+from narrative.narrative_io import read_csv_auto, normalize_to_canonical
+
 
 # ---------------------------
 # Page setup
@@ -57,8 +59,9 @@ df = None
 error = None
 try:
     if uploaded is not None:
-        raw = pd.read_csv(uploaded)
-        df = normalize_to_canonical(raw)
+raw = read_csv_auto(uploaded)   # robust reader (UTF-16/UTF-8-SIG/TSV)
+df  = normalize_to_canonical(raw)
+
     elif use_demo:
         demo = pd.DataFrame({
             "headline": [
