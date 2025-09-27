@@ -175,8 +175,9 @@ def embed_df_texts(df_in: pd.DataFrame):
     return emb
 
 # --- Clustering with Narrative Generation ---
-st.header("Clustering")
-k = st.slider("Number of clusters (KMeans)", 2, 12, 6, 1)
+st.header("Run Clusters")
+st.markdown("Use the sliding scale to set the number of narrative categories for your data. You can always adjust it to capture the main narratives more exactly.")
+k = st.slider("Number of clusters", 2, 12, 6, 1)
 if st.button("Run clustering"):
     with st.spinner("Hold on, we are generating narratives for you!"):
         embeddings = embed_df_texts(st.session_state["df"])
