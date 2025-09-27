@@ -2,7 +2,7 @@
 # Features:
 # - Upload & normalize CSV (Title/Snippet/Date/URL) with robust encoding handling
 # - Embeddings (SBERT, cached)
-# - KMeans clustering with narrative generation (one click)
+# - KMeans clustering with narrative generation (one click, main interface)
 # - Narrative volumes (bar chart with short 2-4 word labels, horizontal)
 # - Sentiment by narrative (stacked bars with short 2-4 word labels, horizontal)
 # - Timeline of narratives over time (sentiment trend with short labels)
@@ -155,9 +155,9 @@ def embed_df_texts(df_in: pd.DataFrame):
     return emb
 
 # --- Clustering with Narrative Generation ---
-st.sidebar.header("Clustering")
-k = st.sidebar.slider("Number of clusters (KMeans)", 2, 12, 6, 1)
-if st.sidebar.button("Run clustering"):
+st.header("Clustering")
+k = st.slider("Number of clusters (KMeans)", 2, 12, 6, 1)
+if st.button("Run clustering"):
     with st.spinner("Hold on, we are generating narratives for you!"):
         embeddings = embed_df_texts(st.session_state["df"])
         labels, _ = run_kmeans(embeddings, n_clusters=k)
@@ -268,4 +268,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
 else:
-    st.info("Upload a dataset and run clustering to generate narratives.")
+    if "df" in st.session_state and not "clustered" in st.session_state:
+        st.info("Run clustering to generate narratives.")
+    else:
+        st.info("Upload a dataset to proceed.")
