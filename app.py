@@ -1,11 +1,3 @@
-# app.py — Narrative Analysis (lean, narrative-focused)
-# Features:
-# - Upload & normalize CSV (Title/Snippet/Date/URL) with robust encoding handling
-# - Embeddings (SBERT, cached)
-# - KMeans clustering with narrative generation (one click, main interface)
-# - Narrative volumes (bar chart with short 2-4 word labels, horizontal)
-# - Toxicity by narrative (stacked bars with short 2-4 word labels, Grok-based, batched)
-# - Timeline of narratives over time (toxicity trend with short labels)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,6 +9,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from collections import Counter
 import openai
 import os
+import json
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto, normalize_to_canonical
@@ -122,8 +115,10 @@ try:
         df = normalize_to_canonical(demo)
 except Exception as e:
     error = str(e)
+
 if error:
     st.error(error)
+
 if df is not None and not df.empty:
     new_sig = _df_signature(df)
     if ("data_sig" not in st.session_state) or (st.session_state["data_sig"] != new_sig):
@@ -164,7 +159,6 @@ if st.button("Run clustering"):
         st.session_state["df"] = df_clustered
         st.session_state["embeddings"] = embeddings
         st.session_state["clustered"] = True
-
         # Generate narratives
         labels_map = {}
         short_labels_map = {}
@@ -192,25 +186,21 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     if emb is None or len(emb) != len(dfc):
         emb = embed_df_texts(dfc)
         st.session_state["embeddings"] = emb
-
     labels_map = st.session_state["labels_map"]
     short_labels_map = st.session_state["short_labels_map"]
     narratives = st.session_state["narratives"]
-
     # Display Narratives with short headers
     st.subheader("Narratives")
     for cid, narrative in narratives.items():
         st.write(f"**{short_labels_map[cid]}**: {narrative}")
-
     # Bar Chart of Narrative Volumes with horizontal short labels
     volume_data = dfc["Cluster"].value_counts().reset_index()
     volume_data.columns = ["Cluster", "Volume"]
     volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
     st.subheader("Narrative Volumes")
     fig_volumes = px.bar(volume_data, x="Narrative", y="Volume", title="Narrative Volumes")
-    fig_volumes.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Volume")  # Horizontal labels
+    fig_volumes.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Volume") # Horizontal labels
     st.plotly_chart(fig_volumes, use_container_width=True)
-
     # Toxicity by Narrative (stacked bars with short labels)
     st.subheader("Toxicity by Narrative")
     if st.button("Compute toxicity"):
@@ -226,38 +216,50 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         temperature=0.1
                     )
                     output = response.choices[0].message.content.strip()
-                    # Parse JSON-like output (simple split for demo; use json.loads in production)
-                    results = eval(output)  # Use json.loads in production for safety
+                    # Parse JSON safely
+                    try:
+                        results = json.loads(output)
+                    except json.JSONDecodeError:
+                        st.warning(f"Failed to parse Grok response as JSON. Using default values.")
+                        results = [[0.0, "neutral"]] * len(texts)
                     # Ensure length matches input
                     if len(results) < len(texts):
                         results.extend([[0.0, "neutral"]] * (len(texts) - len(results)))
+                    elif len(results) > len(texts):
+                        results = results[:len(texts)]
                     return [r[0] for r in results], [r[1] for r in results]
                 except Exception as e:
-                    st.warning(f"Toxicity batch error: {e}")
+                    st.warning(f"Toxicity batch error: {e}. Using default values.")
                     return [0.0] * len(texts), ["neutral"] * len(texts)
-
-            # Batch process (50 rows per batch to manage tokens)
-            batch_size = 50
-            scores = []
-            categories = []
-            texts = (dfc["Snippet"] + " " + dfc["Title"].astype(str)).tolist()
-            for i in range(0, len(texts), batch_size):
-                batch_texts = texts[i:i + batch_size]
-                batch_scores, batch_categories = compute_grok_toxicity_batch(batch_texts)
-                scores.extend(batch_scores)
-                categories.extend(batch_categories)
-                st.progress(i / len(texts))  # Progress bar
-
-            # Validate length and pad if necessary
-            if len(scores) != len(dfc):
-                padding = [0.0] * (len(dfc) - len(scores))
-                scores.extend(padding)
-                categories.extend(["neutral"] * len(padding))
-                st.warning(f"Padded toxicity scores to match DataFrame length: {len(dfc)} rows.")
-
-            dfc["Toxicity_Score"] = scores
-            dfc["Toxicity_Category"] = categories
-            st.session_state["df"] = dfc
+            # Preprocess: Filter out invalid texts (NaN or non-string)
+            dfc_filtered = dfc.dropna(subset=["Title", "Snippet"])
+            dfc_filtered = dfc_filtered[dfc_filtered["Title"].apply(lambda x: isinstance(x, str)) & dfc_filtered["Snippet"].apply(lambda x: isinstance(x, str))]
+            if dfc_filtered.empty:
+                st.error("No valid texts available for toxicity analysis.")
+            else:
+                # Batch process (50 rows per batch to manage tokens)
+                batch_size = 50
+                scores = []
+                categories = []
+                texts = (dfc_filtered["Snippet"] + " " + dfc_filtered["Title"]).tolist()
+                # Debug: Print lengths for diagnostics (can be removed in production)
+                # st.write(f"Processing {len(texts)} valid texts for toxicity.")
+                for i in range(0, len(texts), batch_size):
+                    batch_texts = texts[i:i + batch_size]
+                    batch_scores, batch_categories = compute_grok_toxicity_batch(batch_texts)
+                    scores.extend(batch_scores)
+                    categories.extend(batch_categories)
+                    st.progress((i + min(batch_size, len(texts))) / len(texts)) # Progress bar
+                # Map scores back to original DataFrame
+                score_dict = dict(zip(dfc_filtered.index, scores))
+                category_dict = dict(zip(dfc_filtered.index, categories))
+                dfc["Toxicity_Score"] = dfc.index.map(lambda x: score_dict.get(x, 0.0))
+                dfc["Toxicity_Category"] = dfc.index.map(lambda x: category_dict.get(x, "neutral"))
+                # Debug: Verify lengths
+                # st.write(f"Length of scores: {len(scores)}, Length of filtered DF: {len(dfc_filtered)}, Length of original DF: {len(dfc)}")
+                if len(scores) != len(dfc_filtered):
+                    st.warning(f"Length mismatch in toxicity scores: {len(scores)} scores vs {len(dfc_filtered)} rows. Padded with defaults.")
+                st.session_state["df"] = dfc
         st.success("Toxicity computed with Grok.")
     if "Toxicity_Score" in dfc.columns:
         toxicity_data = dfc.groupby("Cluster")["Toxicity_Score"].mean().reset_index()
@@ -272,11 +274,10 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             color_discrete_map={"Low": "#2ca02c", "Medium": "#9e9e9e", "High": "#d62728"},
             labels={"Toxicity_Score": "Average Toxicity Score (0-1)"}
         )
-        fig_toxicity.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Toxicity Score")  # Horizontal labels
+        fig_toxicity.update_layout(xaxis={'tickangle': 0}, xaxis_title="Narrative", yaxis_title="Toxicity Score") # Horizontal labels
         st.plotly_chart(fig_toxicity, use_container_width=True)
     else:
         st.caption("Click **Compute toxicity** to score and visualize.")
-
     # Timeline of Narratives (Toxicity Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
     if date_column and dfc[date_column].notna().any() and "Toxicity_Score" in dfc.columns:
