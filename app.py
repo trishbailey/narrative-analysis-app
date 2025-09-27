@@ -29,17 +29,16 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .stSidebar {
-        background-color: #d1d5db; /* Much lighter gray sidebar for improved readability */
+        background-color: #d1d5db; /* Lighter gray sidebar for improved readability */
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
-    .stSidebar, .stSidebar h2, .stSidebar label, .stSidebar .stCheckbox label, .stSidebar .stButton>button, .stSidebar .stFileUploader label {
+    .stSidebar, .stSidebar h2, .stSidebar label, .stSidebar .stCheckbox label, .stSidebar .stFileUploader label {
         color: #4b5563 !important; /* Dark gray text for high contrast */
     }
     h1, h2, h3 {
         font-family: 'Roboto', sans-serif;
-        color: #ffffff !important; /* White text for button */
-        background-color: #6b7280 !important; /* Gray background for sidebar button */
+        color: #1a3c6d;
     }
     .stButton>button {
         background-color: #1a3c6d;
@@ -48,7 +47,7 @@ st.markdown("""
         padding: 0.5rem 1rem;
     }
     .stButton>button:hover {
-        background-color: #4b5563 !important; /* Darker gray on hover for sidebar button */
+        background-color: #2e5aa8;
     }
     /* Slider styling */
     .stSlider [type="range"] {
