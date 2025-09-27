@@ -8,3 +8,4 @@ nltk
 scipy
 openai
 sentence-transformers
+streamlit-confetti
