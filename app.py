@@ -184,99 +184,62 @@ if run_btn:
     st.success("Clustering complete.")
 
 # ---------------------------
-# Auto-label ideas (no manual naming, no commitment)
+# Auto-label ideas (from narrative one-liners)
 # ---------------------------
-st.subheader("Auto-label ideas (no manual naming)")
+from narrative.narrative_summarize import summarize_narratives
+
+st.subheader("Auto-label ideas")
 
 if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
     dfc = st.session_state["df"].copy()
 
-    # Ensure embeddings exist
     emb = st.session_state.get("embeddings")
     if emb is None or len(emb) != len(dfc):
         emb = embed_df_texts(dfc)
         st.session_state["embeddings"] = emb
 
-    # Simple cleaner + short labeler
-    _STOP = {
+    # Build one-liners first
+    narr_df = summarize_narratives(dfc, emb, label_col="Cluster", topk_central=5)
+    # Create short labels from narratives (first 5 content words)
+    STOP = {
         "the","a","an","and","or","for","to","of","in","on","at","with","by","after","before","from",
         "is","are","was","were","be","been","being","it","its","this","that","these","those","as",
         "over","under","about","into","out","up","down","than","then","but","so","if","while","when",
         "you","we","they","he","she","i"
     }
+    def short_label(s: str, max_words=5) -> str:
+        toks = re.sub(r"[^A-Za-z0-9\s]", " ", s).lower().split()
+        kept = [w for w in toks if w not in STOP]
+        return (" ".join(kept[:max_words]) or "idea").title()
 
-    import re
-    def _clean_text(s: str) -> str:
-        s = str(s or "")
-        s = re.sub(r"http\S+|\S+@\S+", " ", s)   # URLs/emails
-        s = re.sub(r"[^A-Za-z0-9\s]", " ", s)   # punctuation
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
-
-    def _first_sentence(text: str, min_len=25, max_len=160) -> str:
-        text = str(text or "").strip()
-        parts = re.split(r'(?<=[\.!?])\s+', text)
-        for p in parts:
-            p = p.strip()
-            if len(p) >= min_len:
-                return (p[:max_len]).rstrip(".") + "."
-        return (text[:max_len]).rstrip(".") + "." if text else ""
-
-    def _short_label(title: str, snippet: str, max_words=5) -> str:
-        """
-        Build a compact label from the best one-liner:
-        - Prefer a good title; else first sentence of snippet.
-        - Keep the most informative words (not stopwords), title-case.
-        """
-        title = (title or "").strip()
-        snippet = (snippet or "").strip()
-        one = title if len(title) >= 30 else _first_sentence(snippet, min_len=20, max_len=100)
-        txt = _clean_text(one).lower().split()
-        kept = [w for w in txt if w not in _STOP]
-        if not kept:
-            kept = _clean_text(title).lower().split() or ["idea"]
-        label = " ".join(kept[:max_words]).title()
-        return label or "Idea"
-
-    # Build labels from central exemplars in each cluster
+    # Map cluster id -> label via narrative row order
+    # narr_df's "Idea" is str of cluster id because we passed label_col="Cluster"
     labels_map = {}
     used = set()
-    for cid in sorted(dfc["Cluster"].unique()):
-        idx = np.where(dfc["Cluster"].values == cid)[0]
-        if len(idx) == 0:
-            continue
-        centroid = emb[idx].mean(axis=0, keepdims=True)
-        sims = cosine_similarity(centroid, emb[idx]).ravel()
-        order = sims.argsort()[::-1]
-        # use up to 3 central items to propose a label; pick the shortest/most distinct
-        proposals = []
-        for j in order[:min(3, len(order))]:
-            r = dfc.iloc[idx[j]]
-            proposals.append(_short_label(r.get("Title",""), r.get("Snippet","")))
-        # Choose the shortest distinct proposal; if collision, append a suffix
-        base = sorted(proposals, key=len)[0] if proposals else f"Idea {cid}"
+    for _, r in narr_df.iterrows():
+        cid = int(r["Idea"])
+        base = short_label(r["Narrative"])
         label = base
-        k = 2
+        n = 2
         while label in used:
-            label = f"{base} #{k}"
-            k += 1
+            label = f"{base} #{n}"
+            n += 1
         used.add(label)
-        labels_map[int(cid)] = label
+        labels_map[cid] = label
 
-    # Apply auto-labels
     dfc["Label"] = dfc["Cluster"].map(labels_map).astype(str)
     st.session_state["labels"] = labels_map
     st.session_state["df"] = dfc
 
-    # Show the mapping table
-    show = (
-        pd.DataFrame({"Cluster": sorted(labels_map.keys()),
-                      "Idea": [labels_map[c] for c in sorted(labels_map.keys())]})
-        .astype({"Cluster":"int"})
+    st.dataframe(
+        pd.DataFrame(
+            {"Cluster": sorted(labels_map.keys()),
+             "Idea": [labels_map[c] for c in sorted(labels_map.keys())]}
+        ),
+        width="stretch"
     )
-    st.dataframe(show, width="stretch")
 else:
-    st.info("Run clustering in the sidebar (or Assign to baseline) to create ideas first.")
+    st.info("Run clustering (or Assign to baseline) to create ideas first.")
 
 
 # ---------------------------
