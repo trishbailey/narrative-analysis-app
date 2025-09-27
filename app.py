@@ -4,7 +4,7 @@
 # - Embeddings (SBERT, cached)
 # - KMeans clustering with narrative generation (one click, main interface)
 # - Narrative volumes (bar chart with short 2-4 word labels, horizontal)
-# - Toxicity by narrative (stacked bars with short 2-4 word labels, Grok-based)
+# - Toxicity by narrative (stacked bars with short 2-4 word labels, Grok-based, batched)
 # - Timeline of narratives over time (toxicity trend with short labels)
 import streamlit as st
 import pandas as pd
@@ -131,11 +131,9 @@ if df is not None and not df.empty:
         st.session_state["data_sig"] = new_sig
         for k in ["embeddings", "clustered", "assigned_from_baseline", "labels", "narratives_generated"]:
             st.session_state.pop(k, None)
-        st.success(f"Loaded {len(df)} rows (new dataset).")
-        st.dataframe(st.session_state["df"].head(5))  # Minimal preview for debugging
+        st.write("Dataset Uploaded Successfully! 🎉")
     else:
-        st.success(f"Loaded {len(st.session_state['df'])} rows (using cached state).")
-        st.dataframe(st.session_state["df"].head(5))  # Minimal preview for debugging
+        st.write("Dataset Uploaded Successfully! 🎉")
 else:
     if "df" in st.session_state:
         st.info("Run clustering to generate narratives.")
@@ -217,26 +215,38 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     st.subheader("Toxicity by Narrative")
     if st.button("Compute toxicity"):
         with st.spinner("Scoring toxicity with Grok..."):
-            def compute_grok_toxicity(text):
-                prompt = f"Analyze this text for toxicity: presence of hate speech, violent language, or inflammatory rhetoric on a scale of 0 (none) to 1 (high). Consider context and sarcasm. Output only the score as a float (e.g., 0.7) and category (hate, violence, neutral)."
+            def compute_grok_toxicity_batch(texts):
+                """Batch process texts for toxicity."""
+                prompt = "Analyze each text for toxicity (hate speech, violent language, inflammatory rhetoric) on a scale of 0 (none) to 1 (high). Output a JSON list of [score, category] pairs, e.g., [[0.7, 'hate'], [0.2, 'neutral']]. Consider context and sarcasm."
                 try:
                     response = client.chat.completions.create(
                         model="grok-4-fast-reasoning",
-                        messages=[{"role": "user", "content": prompt + f"\n\nText: {text[:500]}"}],
-                        max_tokens=20,
+                        messages=[{"role": "user", "content": prompt + f"\n\nTexts: {texts}"}],
+                        max_tokens=500,
                         temperature=0.1
                     )
                     output = response.choices[0].message.content.strip()
-                    score = float(output.split()[0])  # First token as score
-                    category = output.split()[-1] if len(output.split()) > 1 else "neutral"
-                    return score, category
+                    # Parse JSON-like output (simple split for demo; use json.loads in production)
+                    results = eval(output)  # Use json.loads in production for safety
+                    return [r[0] for r in results], [r[1] for r in results]
                 except Exception as e:
-                    st.warning(f"Toxicity error for text: {e}")
-                    return 0.0, "neutral"
+                    st.warning(f"Toxicity batch error: {e}")
+                    return [0.0] * len(texts), ["neutral"] * len(texts)
 
-            # Apply toxicity analysis to each row
-            dfc["Toxicity_Score"] = dfc.apply(lambda row: compute_grok_toxicity(row["Snippet"] + " " + str(row["Title"]))[0], axis=1)
-            dfc["Toxicity_Category"] = dfc.apply(lambda row: compute_grok_toxicity(row["Snippet"] + " " + str(row["Title"]))[1], axis=1)
+            # Batch process (50 rows per batch to manage tokens)
+            batch_size = 50
+            scores = []
+            categories = []
+            texts = (dfc["Snippet"] + " " + dfc["Title"].astype(str)).tolist()
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                batch_scores, batch_categories = compute_grok_toxicity_batch(batch_texts)
+                scores.extend(batch_scores)
+                categories.extend(batch_categories)
+                st.progress(i / len(texts))  # Progress bar
+
+            dfc["Toxicity_Score"] = scores
+            dfc["Toxicity_Category"] = categories
             st.session_state["df"] = dfc
         st.success("Toxicity computed with Grok.")
     if "Toxicity_Score" in dfc.columns:
