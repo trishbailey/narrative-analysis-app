@@ -243,6 +243,9 @@ st.markdown("""
     .stSlider [type="range"]::-webkit-slider-runnable-track {
         background: linear-gradient(to right, #4a90e2 0%, #4a90e2 var(--thumb-position), #d3d8e0 var(--thumb-position), #d3d8e0 100%);
     }
+    .stTable {
+        background-color: rgba(247,249,252,0.8);
+    }
     </style>
 """, unsafe_allow_html=True)
 
