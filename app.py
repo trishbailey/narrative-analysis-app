@@ -11,6 +11,7 @@ from collections import Counter
 import openai
 import os
 import io
+from streamlit_confetti import streamlit_confetti
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto
@@ -106,7 +107,8 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
     def _parse_meltwater_datetime(df: pd.DataFrame, norm2orig: dict) -> pd.Series:
         def _coerce(s: pd.Series) -> pd.Series:
             s = s.astype(str).str.replace(r'(?i)(am|pm)$', r' \1', regex=True)
-            return pd.to_datetime(s, errors="coerce", dayfirst=True)
+            # Specify format to handle Meltwater dates like '15-Sep-2025 02:55PM'
+            return pd.to_datetime(s, errors="coerce", format="%d-%b-%Y %I:%M%p", dayfirst=True)
         date_col = norm2orig.get("date")
         alt_col = norm2orig.get("alternatedateformat")
         time_col = norm2orig.get("time")
@@ -441,6 +443,7 @@ if st.button("Run clustering"):
         st.session_state["narratives"] = narratives
         st.session_state["narratives_generated"] = True
     st.success("Clustering and narrative generation complete.")
+    streamlit_confetti()  # Trigger confetti burst
 
 # --- Custom Color Palette ---
 COLOR_PALETTE = [
@@ -529,7 +532,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         ay=-30,
         font=dict(size=12, color="#1a3c6d")
     )
-    st.plotly_chart(fig_volumes, use_container_width=True)
+    st.plotly_chart(fig_volumes, width="stretch")
     # Timeline of Narratives (Volume Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
     timeline_data = None
@@ -621,7 +624,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         ay=-30,
                         font=dict(size=12, color="#1a3c6d")
                     )
-                    st.plotly_chart(fig_timeline, use_container_width=True)
+                    st.plotly_chart(fig_timeline, width="stretch")
             except KeyError:
                 st.warning(f"No valid {date_column} data for timeline. Ensure dates are properly formatted.")
         else:
@@ -692,7 +695,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     ay=-30,
                     font=dict(size=12, color="#1a3c6d")
                 )
-            st.plotly_chart(fig_volume_authors, use_container_width=True)
+            st.plotly_chart(fig_volume_authors, width="stretch")
         
         # Engagement Bar Chart
         with col2:
@@ -735,7 +738,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     ay=-30,
                     font=dict(size=12, color="#1a3c6d")
                 )
-                st.plotly_chart(fig_engagement_authors, use_container_width=True)
+                st.plotly_chart(fig_engagement_authors, width="stretch")
 
     # Author-Theme Correlation
     st.subheader("Author-Theme Correlation")
@@ -788,7 +791,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 ay=-30,
                 font=dict(size=12, color="#1a3c6d")
             )
-            st.plotly_chart(fig_correlation, use_container_width=True)
+            st.plotly_chart(fig_correlation, width="stretch")
         else:
             st.warning("No data available for poster-theme correlation. Ensure posters and clusters are present.")
     else:
