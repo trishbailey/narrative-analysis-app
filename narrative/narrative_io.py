@@ -35,11 +35,78 @@ def _pick(colnames_norm: list[str], candidates: list[str]) -> Optional[str]:
             return cand
     return None
 
-def read_csv_auto(path_or_buf: Union[str, bytes]) -> pd.DataFrame:
-    try:
-        return pd.read_csv(path_or_buf)
-    except UnicodeDecodeError:
-        return pd.read_csv(path_or_buf, encoding="latin-1")
+def read_csv_auto(path_or_buf, nrows=None):
+    """Robust CSV reader: detects UTF-16/UTF-8-SIG, guesses delimiter, skips bad lines."""
+    import io, os
+    import pandas as pd
+
+    def _to_bytes(src):
+        # bytes from file-like, bytes, path, or text
+        if hasattr(src, "read"):  # UploadedFile / BytesIO
+            try:
+                pos = src.tell()
+            except Exception:
+                pos = None
+            data = src.read()
+            try:
+                if pos is not None:
+                    src.seek(pos)
+                else:
+                    src.seek(0)
+            except Exception:
+                pass
+            return data
+        if isinstance(src, (bytes, bytearray)):
+            return bytes(src)
+        if isinstance(src, str) and os.path.exists(src):
+            with open(src, "rb") as f:
+                return f.read()
+        # treat as text
+        return str(src).encode("utf-8", "ignore")
+
+    b = _to_bytes(path_or_buf)
+    sample = b[:16384]
+
+    # Detect BOM/likely encodings
+    encodings = []
+    if len(b) >= 2 and b[0] == 0xFF and b[1] == 0xFE:
+        encodings = ["utf-16", "utf-16-le"]
+    elif len(b) >= 2 and b[0] == 0xFE and b[1] == 0xFF:
+        encodings = ["utf-16", "utf-16-be"]
+    elif len(b) >= 3 and b[0] == 0xEF and b[1] == 0xBB and b[2] == 0xBF:
+        encodings = ["utf-8-sig"]
+    else:
+        encodings = ["utf-8", "utf-8-sig", "utf-16", "latin-1"]
+
+    # Guess delimiter (tab vs comma)
+    def guess_delim(txt: str):
+        return "\t" if txt.count("\t") > txt.count(",") else None  # None => let pandas sniff
+
+    for enc in encodings:
+        try:
+            text = b.decode(enc, errors="strict")
+            sep = guess_delim(text)
+            return pd.read_csv(
+                io.StringIO(text),
+                nrows=nrows,
+                sep=sep,              # '\t' if tabs dominate, else sniff
+                engine="python",      # enables sep=None sniff if sep is None
+                on_bad_lines="skip",  # skip malformed rows
+            )
+        except Exception:
+            continue
+
+    # Last resort: permissive latin-1
+    text = b.decode("latin-1", errors="ignore")
+    sep = guess_delim(text)
+    return pd.read_csv(
+        io.StringIO(text),
+        nrows=nrows,
+        sep=sep,
+        engine="python",
+        on_bad_lines="skip",
+    )
+
 
 def _first_nonempty(df: pd.DataFrame, col_keys: list[str], norm2orig: dict) -> pd.Series:
     """Return the first non-empty string across candidate columns."""
