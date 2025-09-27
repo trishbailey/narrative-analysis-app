@@ -11,7 +11,6 @@ from collections import Counter
 import openai
 import os
 import io
-from streamlit_confetti import confetti
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto
@@ -107,7 +106,22 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
     def _parse_meltwater_datetime(df: pd.DataFrame, norm2orig: dict) -> pd.Series:
         def _coerce(s: pd.Series) -> pd.Series:
             s = s.astype(str).str.replace(r'(?i)(am|pm)$', r' \1', regex=True)
-            return pd.to_datetime(s, errors="coerce", dayfirst=True)
+            # Try multiple date formats to reduce parsing warnings
+            formats = [
+                "%d-%b-%Y %I:%M%p",  # e.g., 15-Sep-2025 02:55PM
+                "%Y-%m-%d %H:%M:%S",  # e.g., 2025-09-15 14:55:00
+                "%m/%d/%Y %I:%M %p",  # e.g., 09/15/2025 02:55 PM
+                "%d/%m/%Y %H:%M"     # e.g., 15/09/2025 14:55
+            ]
+            result = pd.Series(pd.NaT, index=s.index)
+            for fmt in formats:
+                temp = pd.to_datetime(s, errors="coerce", format=fmt, dayfirst=True)
+                result = result.fillna(temp)
+            # Fallback to dateutil if all formats fail
+            if result.isna().any():
+                temp = pd.to_datetime(s, errors="coerce", dayfirst=True)
+                result = result.fillna(temp)
+            return result
         date_col = norm2orig.get("date")
         alt_col = norm2orig.get("alternatedateformat")
         time_col = norm2orig.get("time")
@@ -180,7 +194,7 @@ st.set_page_config(page_title="Narrative Analysis", layout="wide")
 st.markdown("""
     <style>
     .main .block-container {
-        padding: 2rem;
+        Великобітанія: 2rem;
         background: linear-gradient(to bottom, #f7f9fc, #e3e9f2);
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
@@ -442,7 +456,6 @@ if st.button("Run clustering"):
         st.session_state["narratives"] = narratives
         st.session_state["narratives_generated"] = True
     st.success("Clustering and narrative generation complete.")
-    confetti()  # Trigger confetti burst
 
 # --- Custom Color Palette ---
 COLOR_PALETTE = [
@@ -531,7 +544,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         ay=-30,
         font=dict(size=12, color="#1a3c6d")
     )
-    st.plotly_chart(fig_volumes, width="stretch")
+    st.plotly_chart(fig_volumes, config=dict(responsive=True))
     # Timeline of Narratives (Volume Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
     timeline_data = None
@@ -623,7 +636,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         ay=-30,
                         font=dict(size=12, color="#1a3c6d")
                     )
-                    st.plotly_chart(fig_timeline, width="stretch")
+                    st.plotly_chart(fig_timeline, config=dict(responsive=True))
             except KeyError:
                 st.warning(f"No valid {date_column} data for timeline. Ensure dates are properly formatted.")
         else:
@@ -694,7 +707,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     ay=-30,
                     font=dict(size=12, color="#1a3c6d")
                 )
-            st.plotly_chart(fig_volume_authors, width="stretch")
+            st.plotly_chart(fig_volume_authors, config=dict(responsive=True))
         
         # Engagement Bar Chart
         with col2:
@@ -737,7 +750,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     ay=-30,
                     font=dict(size=12, color="#1a3c6d")
                 )
-                st.plotly_chart(fig_engagement_authors, width="stretch")
+                st.plotly_chart(fig_engagement_authors, config=dict(responsive=True))
 
     # Author-Theme Correlation
     st.subheader("Author-Theme Correlation")
@@ -790,7 +803,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 ay=-30,
                 font=dict(size=12, color="#1a3c6d")
             )
-            st.plotly_chart(fig_correlation, width="stretch")
+            st.plotly_chart(fig_correlation, config=dict(responsive=True))
         else:
             st.warning("No data available for poster-theme correlation. Ensure posters and clusters are present.")
     else:
