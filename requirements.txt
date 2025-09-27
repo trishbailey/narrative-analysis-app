@@ -6,3 +6,5 @@ plotly
 umap-learn
 nltk
 scipy
+openai
+sentence-transformers
