@@ -204,26 +204,52 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
     if date_column and dfc[date_column].notna().any():
         dfc[date_column] = pd.to_datetime(dfc[date_column], errors="coerce")
-        try:
-            timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq="W")]).size().reset_index(name="Volume")
-            timeline_data["Narrative"] = timeline_data["Cluster"].map(short_labels_map)
-            st.subheader("Narrative Trends Over Time")
-            fig_timeline = px.line(
-                timeline_data,
-                x=date_column,
-                y="Volume",
-                color="Narrative",
-                title="Weekly Narrative Volume Trends",
-                labels={"Volume": "Post Count", date_column: "Week"},
-                markers=True
-            )
-            fig_timeline.update_yaxes(
-                title="Number of Posts",
-                tickformat="d"  # Ensure integer ticks for counts
-            )
-            st.plotly_chart(fig_timeline, use_container_width=True)
-        except KeyError:
-            st.warning(f"No valid {date_column} data for timeline. Ensure dates are properly formatted.")
+        min_date = dfc[date_column].min()
+        max_date = dfc[date_column].max()
+        span_days = (max_date - min_date).days if pd.notnull(min_date) and pd.notnull(max_date) else 0
+        if span_days > 0:
+            if span_days <= 3:
+                freq = 'D'
+            elif span_days < 7:
+                freq = 'D'
+            elif span_days < 30:
+                freq = '3D'
+            elif span_days < 90:
+                freq = 'W'
+            else:
+                freq = 'M'
+            if freq == 'D':
+                x_title = 'Day'
+            elif freq == '3D':
+                x_title = '3-Day Period'
+            elif freq == 'W':
+                x_title = 'Week'
+            elif freq == 'M':
+                x_title = 'Month'
+            else:
+                x_title = 'Period'
+            try:
+                timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq=freq)]).size().reset_index(name="Volume")
+                timeline_data["Narrative"] = timeline_data["Cluster"].map(short_labels_map)
+                st.subheader("Narrative Trends Over Time")
+                fig_timeline = px.line(
+                    timeline_data,
+                    x=date_column,
+                    y="Volume",
+                    color="Narrative",
+                    title="Narrative Trends Over Time",
+                    labels={"Volume": "Post Count", date_column: x_title},
+                    markers=True
+                )
+                fig_timeline.update_yaxes(
+                    title="Number of Posts",
+                    tickformat="d"  # Ensure integer ticks for counts
+                )
+                st.plotly_chart(fig_timeline, use_container_width=True)
+            except KeyError:
+                st.warning(f"No valid {date_column} data for timeline. Ensure dates are properly formatted.")
+        else:
+            st.warning("Insufficient time span in data for trends. All dates are the same or invalid.")
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
 else:
