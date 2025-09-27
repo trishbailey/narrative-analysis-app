@@ -19,14 +19,22 @@ from narrative.narrative_cluster import run_kmeans, attach_clusters
 # --- Page setup ---
 st.set_page_config(page_title="Narrative Analysis", layout="wide")
 
-# Custom CSS for a polished look, including slider styling
+# Custom CSS for a polished look with updated background
 st.markdown("""
     <style>
     .main .block-container {
         padding: 2rem;
-        background-color: #f7f9fc;
+        background: linear-gradient(to bottom, #f7f9fc, #e3e9f2); /* Gradient background */
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .stSidebar {
+        background-color: #2e3b4e; /* Soft navy sidebar */
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .stSidebar h2, .stSidebar label, .stSidebar .stCheckbox label, .stSidebar .stButton>button {
+        color: #ffffff !important; /* White text for sidebar contrast */
     }
     h1, h2, h3 {
         font-family: 'Roboto', sans-serif;
