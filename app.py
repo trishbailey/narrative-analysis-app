@@ -10,11 +10,141 @@ from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from collections import Counter
 import openai
 import os
+import io
 
 # --- Reusable modules ---
-from narrative.narrative_io import read_csv_auto, normalize_to_canonical
+from narrative.narrative_io import read_csv_auto
 from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
 from narrative.narrative_cluster import run_kmeans, attach_clusters
+
+# --- Modified normalize_to_canonical to preserve Influencer and Twitter Screen Name ---
+def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize a raw DataFrame to the canonical columns:
+    Title, Snippet, (optional) Date, URL, author, display_name.
+    Handles Meltwater X columns like Opening Text / Hit Sentence / Parent URL / Alternate Date Format / Time.
+    Preserves Influencer as author and Twitter Screen Name as display_name.
+    """
+    # Map normalized -> original names
+    norm2orig: dict[str, str] = {}
+    cols_norm: list[str] = []
+    for c in df_raw.columns:
+        k = re.sub(r"\s+|_", "", c.strip().lower())
+        norm2orig[k] = c
+        cols_norm.append(k)
+    
+    # Canonical alias lists
+    ALIASES = {
+        "title": ["title", "headline", "headlines", "inputname", "keywords"],
+        "snippet": ["snippet", "summary", "description", "dek", "selftext", "selftext_html", "body", "text", "openingtext", "hitsentence"],
+        "date": ["date", "published", "pubdate", "time", "created", "created_iso", "created_utc", "alternatedateformat"],
+        "url": ["url", "link", "permalink", "parenturl"],
+        "author": ["author", "influencer"],
+        "display_name": ["twitter screen name"]
+    }
+
+    # Identify common fields
+    title_key = next((k for k in ALIASES["title"] if k in norm2orig), None)
+    snippet_key = next((k for k in ALIASES["snippet"] if k in norm2orig), None)
+    date_key = next((k for k in ALIASES["date"] if k in norm2orig), None)
+    url_key = next((k for k in ALIASES["url"] if k in norm2orig), None)
+    author_key = next((k for k in ALIASES["author"] if k in norm2orig), None)
+    display_name_key = next((k for k in ALIASES["display_name"] if k in norm2orig), None)
+
+    # --- MELTWATER-SPECIFIC TITLE/SNIPPET LOGIC ---
+    headline = norm2orig.get("headline")
+    hitsent = norm2orig.get("hitsentence")
+    opentxt = norm2orig.get("openingtext")
+    inputname = norm2orig.get("inputname")
+    keywords = norm2orig.get("keywords")
+
+    # Build Title
+    if headline:
+        title_series = df_raw[headline].fillna("").astype(str).str.strip()
+    elif hitsent:
+        title_series = df_raw[hitsent].fillna("").astype(str).str.strip()
+    elif opentxt:
+        title_series = df_raw[opentxt].fillna("").astype(str).str.strip()
+    elif inputname:
+        title_series = df_raw[inputname].fillna("").astype(str).str.strip()
+    elif keywords:
+        title_series = df_raw[keywords].fillna("").astype(str).str.strip()
+    else:
+        title_series = pd.Series([""] * len(df_raw), dtype=object)
+        for k in ALIASES["title"]:
+            if k in norm2orig:
+                s = df_raw[norm2orig[k]].fillna("").astype(str).str.strip()
+                title_series = title_series.mask(~title_series.astype(bool), s)
+
+    # Build Snippet
+    if opentxt:
+        snippet_series = df_raw[opentxt].fillna("").astype(str).str.strip()
+    elif hitsent:
+        snippet_series = df_raw[hitsent].fillna("").astype(str).str.strip()
+    elif headline:
+        snippet_series = df_raw[headline].fillna("").astype(str).str.strip()
+    else:
+        snippet_series = pd.Series([""] * len(df_raw), dtype=object)
+        for k in ALIASES["snippet"]:
+            if k in norm2orig:
+                s = df_raw[norm2orig[k]].fillna("").astype(str).str.strip()
+                snippet_series = snippet_series.mask(~snippet_series.astype(bool), s)
+
+    # Build Date
+    def _parse_meltwater_datetime(df: pd.DataFrame, norm2orig: dict) -> pd.Series:
+        def _coerce(s: pd.Series) -> pd.Series:
+            s = s.astype(str).str.replace(r'(?i)(am|pm)$', r' \1', regex=True)
+            return pd.to_datetime(s, errors="coerce", dayfirst=True)
+        date_col = norm2orig.get("date")
+        alt_col = norm2orig.get("alternatedateformat")
+        time_col = norm2orig.get("time")
+        if date_col:
+            d = _coerce(df[date_col])
+        else:
+            d = pd.Series(pd.NaT, index=df.index)
+        need = d.isna()
+        if need.any() and (alt_col or time_col):
+            alt = df[norm2orig.get("alternatedateformat", "")].astype(str).str.strip() if alt_col else ""
+            tim = df[norm2orig.get("time", "")].astype(str).str.strip() if time_col else ""
+            combo = (alt + " " + tim).str.strip()
+            d2 = _coerce(combo)
+            d = d.fillna(d2)
+        return d
+
+    if date_key:
+        date_series = _parse_meltwater_datetime(df_raw, norm2orig)
+    else:
+        date_series = _parse_meltwater_datetime(df_raw, norm2orig)
+
+    # Build URL
+    if "parenturl" in norm2orig:
+        url_series = df_raw[norm2orig["parenturl"]].fillna("").astype(str).str.strip()
+    elif url_key:
+        url_series = df_raw[norm2orig[url_key]].fillna("").astype(str).str.strip()
+    else:
+        url_series = pd.Series([""] * len(df_raw), dtype=object)
+
+    # Build Author (Influencer)
+    author_series = df_raw[norm2orig[author_key]].fillna("").astype(str).str.strip() if author_key else pd.Series([""] * len(df_raw), dtype=object)
+
+    # Build Display Name (Twitter Screen Name)
+    display_name_series = df_raw[norm2orig[display_name_key]].fillna("").astype(str).str.strip() if display_name_key else pd.Series([""] * len(df_raw), dtype=object)
+
+    # Assemble canonical DataFrame
+    df = pd.DataFrame({
+        "Title": title_series,
+        "Snippet": snippet_series,
+        "Date": date_series,
+        "URL": url_series,
+        "author": author_series,
+        "display_name": display_name_series
+    })
+
+    # Clean rows: require either Title or Snippet
+    df = df[(df["Title"].str.len() > 0) | (df["Snippet"].str.len() > 0)].copy()
+    df.drop_duplicates(subset=["Title", "Snippet"], inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    return df
 
 # --- Page setup ---
 st.set_page_config(page_title="Narrative Analysis", layout="wide")
@@ -24,17 +154,17 @@ st.markdown("""
     <style>
     .main .block-container {
         padding: 2rem;
-        background: linear-gradient(to bottom, #f7f9fc, #e3e9f2); /* Gradient background */
+        background: linear-gradient(to bottom, #f7f9fc, #e3e9f2);
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .stSidebar {
-        background-color: #d1d5db; /* Lighter gray sidebar for improved readability */
+        background-color: #d1d5db;
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .stSidebar, .stSidebar h2, .stSidebar label, .stSidebar .stCheckbox label, .stSidebar .stFileUploader label {
-        color: #4b5563 !important; /* Dark gray text for high contrast */
+        color: #4b5563 !important;
     }
     h1, h2, h3 {
         font-family: 'Roboto', sans-serif;
@@ -49,12 +179,11 @@ st.markdown("""
     .stButton>button:hover {
         background-color: #2e5aa8;
     }
-    /* Slider styling */
     .stSlider [type="range"] {
         -webkit-appearance: none;
         appearance: none;
         height: 8px;
-        background: #d3d8e0; /* Track color */
+        background: #d3d8e0;
         border-radius: 5px;
     }
     .stSlider [type="range"]::-webkit-slider-thumb {
@@ -62,7 +191,7 @@ st.markdown("""
         appearance: none;
         width: 16px;
         height: 16px;
-        background-color: #1a3c6d; /* Dark blue thumb */
+        background-color: #1a3c6d;
         border-radius: 50%;
         cursor: pointer;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -70,18 +199,18 @@ st.markdown("""
     .stSlider [type="range"]::-moz-range-thumb {
         width: 16px;
         height: 16px;
-        background-color: #1a3c6d; /* Dark blue thumb */
+        background-color: #1a3c6d;
         border-radius: 50%;
         cursor: pointer;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
     }
     .stSlider [type="range"]::-webkit-slider-runnable-track {
-        background: #d3d8e0; /* Track color */
+        background: #d3d8e0;
         height: 8px;
         border-radius: 5px;
     }
     .stSlider [type="range"]::-moz-range-track {
-        background: #d3d8e0; /* Track color */
+        background: #d3d8e0;
         height: 8px;
         border-radius: 5px;
     }
@@ -176,7 +305,9 @@ try:
     if uploaded is not None:
         raw = read_csv_auto(uploaded)
         if raw is not None:
+            st.write(f"Raw DataFrame columns: {raw.columns.tolist()}")
             df = normalize_to_canonical(raw)
+            st.write(f"Normalized DataFrame columns: {df.columns.tolist()}")
 except Exception as e:
     error = str(e)
 
@@ -197,7 +328,7 @@ else:
     if "df" in st.session_state:
         st.info("Run clustering to generate narratives.")
     else:
-        st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet. Optional: Date, URL.")
+        st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet, Influencer. Optional: Date, URL, Twitter Screen Name, Likes, Reposts, Replies.")
     st.stop()
 
 # --- Embeddings ---
@@ -215,7 +346,7 @@ def embed_df_texts(df_in: pd.DataFrame):
 # --- Clustering with Narrative Generation ---
 st.header("Run Clusters")
 st.markdown("Use the sliding scale to set the number of narrative categories for your data. You can always adjust it to capture the main narratives more exactly.")
-k = st.slider("Number of clusters (KMeans)", 2, 12, 6, 1)
+k = st.slider("Number of clusters", 2, 12, 6, 1)
 if st.button("Run clustering"):
     with st.spinner("Hold on, we are generating narratives for you!"):
         embeddings = embed_df_texts(st.session_state["df"])
@@ -429,21 +560,36 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             st.warning("Insufficient time span in data for trends. All dates are the same or invalid.")
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
+
     # Top 10 Posters Analysis
     st.subheader("Top Posters Analysis")
-    author_col = next((col for col in ["author", "Influencer"] if col in dfc.columns), None)
-    if author_col:
+    if 'author' in dfc.columns:
+        # Create display label combining display_name and author
+        dfc['display_label'] = dfc.apply(
+            lambda x: f"{x['display_name']} ({x['author']})" if pd.notnull(x.get('display_name')) and x['display_name'] else x['author'],
+            axis=1
+        )
+        
         # Compute top 10 by volume
-        volume_by_author = dfc.groupby(author_col).size().nlargest(10).reset_index(name='Volume')
-        # Compute top 10 by engagement (sum of likes, reposts, replies)
+        volume_by_author = dfc.groupby(['author', 'display_label']).size().reset_index(name='Volume').nlargest(10, 'Volume')
+        # Compute top 10 by engagement
         engagement_cols = [col for col in ['likes', 'reposts', 'replies', 'Likes', 'Reposts', 'Retweets', 'Comments', 'Shares', 'Reactions'] if col in dfc.columns]
         if engagement_cols:
-            engagement_by_author = dfc.groupby(author_col)[engagement_cols].sum().sum(axis=1).nlargest(10).reset_index(name='Engagement')
+            engagement_by_author = dfc.groupby(['author', 'display_label'])[engagement_cols].sum().sum(axis=1).reset_index(name='Engagement').nlargest(10, 'Engagement')
         else:
-            engagement_by_author = pd.DataFrame({author_col: [], 'Engagement': []})
+            engagement_by_author = pd.DataFrame({'author': [], 'display_label': [], 'Engagement': []})
             st.warning("No engagement columns (likes, reposts, replies, Likes, Reposts, Retweets, Comments, Shares, Reactions) found in dataset. Engagement chart skipped.")
         
-        # Create two-column layout
+        # Display table of top posters
+        if not volume_by_author.empty:
+            table_data = volume_by_author[['display_label', 'Volume']].merge(
+                engagement_by_author[['display_label', 'Engagement']], on='display_label', how='outer'
+            ).fillna({'Volume': 0, 'Engagement': 0})
+            table_data.columns = ['Poster', 'Volume (Posts)', 'Engagement (Likes + Reposts + Replies)']
+            st.write("**Top Posters Table**")
+            st.dataframe(table_data, use_container_width=True)
+        
+        # Create two-column layout for bar charts
         col1, col2 = st.columns(2)
         
         # Volume Bar Chart
@@ -451,9 +597,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             fig_volume_authors = px.bar(
                 volume_by_author,
                 x='Volume',
-                y=author_col,
+                y='display_label',
                 title="Top 10 Posters by Volume",
-                color=author_col,
+                color='display_label',
                 color_discrete_sequence=COLOR_PALETTE,
                 orientation='h'
             )
@@ -475,7 +621,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
             )
             if not volume_by_author.empty:
-                max_volume_author = volume_by_author.iloc[0][author_col]
+                max_volume_author = volume_by_author.iloc[0]['display_label']
                 max_volume_value = volume_by_author.iloc[0]['Volume']
                 fig_volume_authors.add_annotation(
                     x=max_volume_value,
@@ -495,9 +641,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 fig_engagement_authors = px.bar(
                     engagement_by_author,
                     x='Engagement',
-                    y=author_col,
+                    y='display_label',
                     title="Top 10 Posters by Engagement",
-                    color=author_col,
+                    color='display_label',
                     color_discrete_sequence=COLOR_PALETTE,
                     orientation='h'
                 )
@@ -518,7 +664,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     hovermode="closest",
                     hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
                 )
-                max_engagement_author = engagement_by_author.iloc[0][author_col]
+                max_engagement_author = engagement_by_author.iloc[0]['display_label']
                 max_engagement_value = engagement_by_author.iloc[0]['Engagement']
                 fig_engagement_authors.add_annotation(
                     x=max_engagement_value,
@@ -531,20 +677,22 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     font=dict(size=12, color="#1a3c6d")
                 )
                 st.plotly_chart(fig_engagement_authors, use_container_width=True)
-    else:
-        st.warning("No 'author' or 'Influencer' column found in dataset. Top posters analysis skipped.")
 
     # Author-Theme Correlation
     st.subheader("Author-Theme Correlation")
-    if author_col:
+    if 'author' in dfc.columns:
         # Compute correlation (post counts by author and cluster)
-        correlation_data = dfc.groupby([author_col, 'Cluster']).size().unstack(fill_value=0)
+        correlation_data = dfc.groupby(['author', 'display_label', 'Cluster']).size().reset_index(name='Volume').pivot_table(
+            index=['author', 'display_label'], columns='Cluster', values='Volume', fill_value=0
+        )
         # Select top 10 authors by volume
-        top_authors = volume_by_author[author_col].tolist()
-        correlation_data = correlation_data.loc[correlation_data.index.isin(top_authors)]
+        top_authors = volume_by_author[['author', 'display_label']].set_index('author')['display_label']
+        correlation_data = correlation_data.loc[correlation_data.index.get_level_values('author').isin(top_authors.index)]
         if not correlation_data.empty:
             # Map cluster IDs to short labels
             correlation_data.columns = [short_labels_map.get(col, f"Cluster {col}") for col in correlation_data.columns]
+            # Use display_label for visualization
+            correlation_data = correlation_data.reset_index().set_index('display_label').drop(columns='author')
             # Create heatmap
             fig_correlation = px.imshow(
                 correlation_data,
@@ -583,10 +731,11 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         else:
             st.warning("No data available for poster-theme correlation. Ensure posters and clusters are present.")
     else:
-        st.warning("No 'author' or 'Influencer' column found in dataset. Poster-theme correlation skipped.")
+        st.warning("No 'author' or 'Influencer' column found in dataset. Poster-theme correlation skipped. Ensure your CSV includes an 'Influencer' column.")
 
 else:
     if "df" in st.session_state and not "clustered" in st.session_state:
         st.info("Run clustering to generate narratives.")
     else:
-        st.info("Upload a dataset to proceed.")
+        st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet, Influencer. Optional: Date, URL, Twitter Screen Name, Likes, Reposts, Replies.")
+    st.stop()
