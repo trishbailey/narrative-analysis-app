@@ -315,62 +315,65 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             try:
                 timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq=freq)]).size().reset_index(name="Volume")
                 timeline_data["Narrative"] = timeline_data["Cluster"].map(short_labels_map)
-                st.subheader("Trends Over Time")
-                fig_timeline = px.line(
-                    timeline_data,
-                    x=date_column,
-                    y="Volume",
-                    color="Narrative",
-                    title="Trends Over Time",
-                    labels={"Volume": "Post Count", date_column: x_title},
-                    markers=True,
-                    line_shape='spline'
-                )
-                # Enhance line chart
-                fig_timeline.update_traces(
-                    line=dict(width=3),
-                    marker=dict(size=8, line=dict(width=1, color='#ffffff')),
-                    mode='lines+markers',
-                    fill='tozeroy',
-                    fillcolor='rgba(0,0,0,0.05)'
-                )
-                fig_timeline.update_layout(
-                    font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-                    title=dict(text="Trends Over Time", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
-                    xaxis=dict(
-                        title=x_title,
-                        title_font=dict(size=14),
-                        tickfont=dict(size=12),
-                        gridcolor="rgba(0,0,0,0.1)"
-                    ),
-                    yaxis=dict(
-                        title="Number of Posts",
-                        title_font=dict(size=14),
-                        tickfont=dict(size=12),
-                        gridcolor="rgba(0,0,0,0.1)",
-                        tickformat="d"
-                    ),
-                    plot_bgcolor="rgba(247,249,252,0.8)",
-                    paper_bgcolor="rgba(255,255,255,0)",
-                    showlegend=True,
-                    margin=dict(l=50, r=50, t=80, b=50),
-                    hovermode="x unified",
-                    hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto"),
-                    color_discrete_sequence=COLOR_PALETTE
-                )
-                # Add annotation for highest volume point
-                max_volume_row = timeline_data.loc[timeline_data["Volume"].idxmax()]
-                fig_timeline.add_annotation(
-                    x=max_volume_row[date_column],
-                    y=max_volume_row["Volume"],
-                    text=f"Peak: {max_volume_row['Volume']}",
-                    showarrow=True,
-                    arrowhead=2,
-                    ax=20,
-                    ay=-30,
-                    font=dict(size=12, color="#1a3c6d")
-                )
-                st.plotly_chart(fig_timeline, use_container_width=True)
+                if timeline_data.empty or timeline_data["Volume"].sum() == 0:
+                    st.warning("No data available for the timeline. Ensure there are posts across multiple time periods.")
+                else:
+                    st.subheader("Trends Over Time")
+                    fig_timeline = px.line(
+                        timeline_data,
+                        x=date_column,
+                        y="Volume",
+                        color="Narrative",
+                        title="Trends Over Time",
+                        labels={"Volume": "Post Count", date_column: x_title},
+                        markers=True,
+                        line_shape='spline',
+                        color_discrete_sequence=COLOR_PALETTE
+                    )
+                    # Enhance line chart
+                    fig_timeline.update_traces(
+                        line=dict(width=3),
+                        marker=dict(size=8, line=dict(width=1, color='#ffffff')),
+                        mode='lines+markers',
+                        fill='tozeroy',
+                        fillcolor='rgba(0,0,0,0.05)'
+                    )
+                    fig_timeline.update_layout(
+                        font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
+                        title=dict(text="Trends Over Time", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
+                        xaxis=dict(
+                            title=x_title,
+                            title_font=dict(size=14),
+                            tickfont=dict(size=12),
+                            gridcolor="rgba(0,0,0,0.1)"
+                        ),
+                        yaxis=dict(
+                            title="Number of Posts",
+                            title_font=dict(size=14),
+                            tickfont=dict(size=12),
+                            gridcolor="rgba(0,0,0,0.1)",
+                            tickformat="d"
+                        ),
+                        plot_bgcolor="rgba(247,249,252,0.8)",
+                        paper_bgcolor="rgba(255,255,255,0)",
+                        showlegend=True,
+                        margin=dict(l=50, r=50, t=80, b=50),
+                        hovermode="x unified",
+                        hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
+                    )
+                    # Add annotation for highest volume point
+                    max_volume_row = timeline_data.loc[timeline_data["Volume"].idxmax()]
+                    fig_timeline.add_annotation(
+                        x=max_volume_row[date_column],
+                        y=max_volume_row["Volume"],
+                        text=f"Peak: {max_volume_row['Volume']}",
+                        showarrow=True,
+                        arrowhead=2,
+                        ax=20,
+                        ay=-30,
+                        font=dict(size=12, color="#1a3c6d")
+                    )
+                    st.plotly_chart(fig_timeline, use_container_width=True)
             except KeyError:
                 st.warning(f"No valid {date_column} data for timeline. Ensure dates are properly formatted.")
         else:
