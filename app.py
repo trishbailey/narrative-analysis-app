@@ -28,29 +28,45 @@ st.set_page_config(page_title="Narrative Analysis", layout="wide")
 st.title("Narrative Analysis")
 
 # ---------------------------
-# Sidebar: data loading
+# Section 1 — Load & normalize (idempotent; preserves clustered df)
 # ---------------------------
 st.sidebar.header("Load Data")
 uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8)", type=["csv"])
 use_demo = st.sidebar.checkbox("Use tiny demo data", value=False)
 
+# A Reset button so you can intentionally clear state and start clean
+if st.sidebar.button("Reset data & state"):
+    for k in ["df", "embeddings", "data_sig", "clustered"]:
+        st.session_state.pop(k, None)
+    st.success("State cleared. Upload or enable demo again.")
+    st.stop()
+
+def _df_signature(d: pd.DataFrame):
+    """A cheap signature so we only replace state when data actually changes."""
+    try:
+        sig = (d.shape, pd.util.hash_pandas_object(d, index=True).sum())
+    except Exception:
+        sig = (d.shape, tuple(sorted(d.columns)))
+    return sig
+
 df = None
 error = None
+
 try:
-    if uploaded:
+    if uploaded is not None:
         raw = pd.read_csv(uploaded)
         df = normalize_to_canonical(raw)
     elif use_demo:
         demo = pd.DataFrame({
             "headline": [
                 "Company X faces investor lawsuit after earnings miss",
-                "CEO of Company Y announces leadership changes",
-                "Analysts debate revenues ahead of Q3 guidance"
+            "CEO of Company Y announces leadership changes",
+            "Analysts debate revenues ahead of Q3 guidance"
             ],
             "summary": [
                 "Plaintiffs allege misleading statements in prior quarter.",
-                "Restructuring aims to streamline operations.",
-                "Market expects mixed results amid broader sector headwinds."
+            "Restructuring aims to streamline operations.",
+            "Market expects mixed results amid broader sector headwinds."
             ],
             "published": ["2025-09-01", "2025-09-05", "2025-09-10"],
             "link": [
@@ -66,17 +82,31 @@ except Exception as e:
 if error:
     st.error(error)
 
+# If we received new data, update state; otherwise keep whatever (possibly clustered) df we already had
 if df is not None and not df.empty:
-    st.success(f"Loaded {len(df)} rows.")
-    st.dataframe(df.head(20), use_container_width=True)
-    st.session_state["df"] = df
+    new_sig = _df_signature(df)
+    if ("data_sig" not in st.session_state) or (st.session_state["data_sig"] != new_sig):
+        # New dataset → store it and clear downstream state
+        st.session_state["df"] = df.reset_index(drop=True)
+        st.session_state["data_sig"] = new_sig
+        st.session_state.pop("embeddings", None)
+        st.session_state.pop("clustered", None)
+        st.success(f"Loaded {len(df)} rows (new dataset).")
+    else:
+        # Same dataset as before → DO NOT overwrite clustered df
+        st.success(f"Loaded {len(st.session_state['df'])} rows (using cached state).")
 else:
-    st.info(
-        "Upload a CSV or enable the demo to proceed.\n\n"
-        "Required columns (any alias): Title/Headline and Snippet/Summary/Description.\n"
-        "Optional: Date, URL."
-    )
-    st.stop()
+    if "df" not in st.session_state:
+        st.info(
+            "Upload a CSV or enable the demo to proceed.\n\n"
+            "Required columns (any alias): Title/Headline and Snippet/Summary/Description.\n"
+            "Optional: Date, URL."
+        )
+        st.stop()
+
+# Show a quick preview (whatever is in state now)
+st.dataframe(st.session_state["df"].head(20), width="stretch")
+
 
 # ---------------------------
 # Embeddings (cached)
