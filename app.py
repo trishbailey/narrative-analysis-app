@@ -2,10 +2,9 @@
 # Features:
 # - Upload & normalize CSV (Title/Snippet/Date/URL) with robust encoding handling
 # - Embeddings (SBERT, cached)
-# - KMeans clustering (one click)
-# - Generate fresh narrative summaries with short 2-4 word labels for graphics
-# - Narrative volumes (bar chart with short labels)
-# - Sentiment by narrative (stacked bars showing % positive/neutral/negative with short labels)
+# - KMeans clustering with narrative generation (one click)
+# - Narrative volumes (bar chart with short 2-4 word labels, horizontal)
+# - Sentiment by narrative (stacked bars with short 2-4 word labels, horizontal)
 # - Timeline of narratives over time (sentiment trend with short labels)
 import streamlit as st
 import pandas as pd
@@ -95,7 +94,7 @@ uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8 / UTF-16 / TSV)", type=["
 use_demo = st.sidebar.checkbox("Use tiny demo data", value=False)
 
 if st.sidebar.button("Reset data & state"):
-    for k in ["df", "embeddings", "data_sig", "clustered", "labels", "baseline", "assigned_from_baseline"]:
+    for k in ["df", "embeddings", "data_sig", "clustered", "labels", "baseline", "assigned_from_baseline", "narratives_generated"]:
         st.session_state.pop(k, None)
     st.success("State cleared. Upload or enable demo again.")
     st.stop()
@@ -131,7 +130,7 @@ if df is not None and not df.empty:
     if ("data_sig" not in st.session_state) or (st.session_state["data_sig"] != new_sig):
         st.session_state["df"] = df.reset_index(drop=True)
         st.session_state["data_sig"] = new_sig
-        for k in ["embeddings", "clustered", "assigned_from_baseline", "labels"]:
+        for k in ["embeddings", "clustered", "assigned_from_baseline", "labels", "narratives_generated"]:
             st.session_state.pop(k, None)
         st.success(f"Loaded {len(df)} rows (new dataset).")
         st.dataframe(st.session_state["df"].head(5))  # Minimal preview for debugging
@@ -155,53 +154,63 @@ def embed_df_texts(df_in: pd.DataFrame):
     emb = embed_texts(model, texts, show_progress=False)
     return emb
 
-# --- Clustering ---
+# --- Clustering with Narrative Generation ---
 st.sidebar.header("Clustering")
 k = st.sidebar.slider("Number of clusters (KMeans)", 2, 12, 6, 1)
 if st.sidebar.button("Run clustering"):
-    with st.spinner("Embedding and clustering..."):
+    with st.spinner("Hold on, we are generating narratives for you!"):
         embeddings = embed_df_texts(st.session_state["df"])
         labels, _ = run_kmeans(embeddings, n_clusters=k)
         df_clustered = attach_clusters(st.session_state["df"], labels)
         st.session_state["df"] = df_clustered
         st.session_state["embeddings"] = embeddings
         st.session_state["clustered"] = True
-    st.success("Clustering complete.")
+
+        # Generate narratives
+        labels_map = {}
+        short_labels_map = {}
+        narratives = {}
+        for cid in sorted(df_clustered["Cluster"].unique()):
+            mask_idx = np.where(df_clustered["Cluster"].values == cid)[0]
+            if len(mask_idx) == 0:
+                continue
+            top_idx = central_indexes(mask_idx, k=5)
+            central_texts = [" ".join([str(df_clustered.iloc[i].get("Title", "") or ""), first_sentence(df_clustered.iloc[i].get("Snippet", ""))]).strip() for i in top_idx]
+            summary, detailed_label, short_label = llm_narrative_summary(central_texts, cid)
+            labels_map[cid] = detailed_label
+            short_labels_map[cid] = short_label
+            narratives[cid] = summary
+        st.session_state["labels_map"] = labels_map
+        st.session_state["short_labels_map"] = short_labels_map
+        st.session_state["narratives"] = narratives
+        st.session_state["narratives_generated"] = True
+    st.success("Clustering and narrative generation complete.")
 
 # --- Main Display ---
-if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
+if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and "narratives_generated" in st.session_state:
     dfc = st.session_state["df"].copy()
     emb = st.session_state.get("embeddings")
     if emb is None or len(emb) != len(dfc):
         emb = embed_df_texts(dfc)
         st.session_state["embeddings"] = emb
 
-    # Generate narratives, detailed labels, and short labels
-    labels_map = {}  # Detailed labels for display
-    short_labels_map = {}  # 2-4 word labels for graphics
-    narratives = {}
-    for cid in sorted(dfc["Cluster"].unique()):
-        mask_idx = np.where(dfc["Cluster"].values == cid)[0]
-        if len(mask_idx) == 0:
-            continue
-        top_idx = central_indexes(mask_idx, k=5)
-        central_texts = [" ".join([str(dfc.iloc[i].get("Title", "") or ""), first_sentence(dfc.iloc[i].get("Snippet", ""))]).strip() for i in top_idx]
-        summary, detailed_label, short_label = llm_narrative_summary(central_texts, cid)
-        labels_map[cid] = detailed_label
-        short_labels_map[cid] = short_label
-        narratives[cid] = summary
+    labels_map = st.session_state["labels_map"]
+    short_labels_map = st.session_state["short_labels_map"]
+    narratives = st.session_state["narratives"]
 
     # Display Narratives with short headers
     st.subheader("Narratives")
     for cid, narrative in narratives.items():
         st.write(f"**{short_labels_map[cid]}**: {narrative}")
 
-    # Bar Chart of Narrative Volumes
+    # Bar Chart of Narrative Volumes with horizontal short labels
     volume_data = dfc["Cluster"].value_counts().reset_index()
     volume_data.columns = ["Cluster", "Volume"]
     volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
     st.subheader("Narrative Volumes")
-    st.bar_chart(volume_data.set_index("Narrative")["Volume"], height=400)
+    fig_volumes = px.bar(volume_data, x="Narrative", y="Volume", title="Narrative Volumes")
+    fig_volumes.update_layout(xaxis={'tickangle': 0})  # Horizontal labels
+    st.plotly_chart(fig_volumes, use_container_width=True)
 
     # Sentiment by Narrative (stacked % positive/neutral/negative)
     st.subheader("Sentiment by Narrative")
@@ -224,7 +233,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns:
             labels={"Percentage": "Percentage (%)"},
             category_orders={"Sentiment": ["Positive", "Neutral", "Negative"]}
         )
-        fig_sentiment.update_layout(barmode="stack")
+        fig_sentiment.update_layout(barmode="stack", bargap=0.1, xaxis={'tickangle': 0})  # Horizontal labels
         st.plotly_chart(fig_sentiment, use_container_width=True)
     else:
         st.caption("Click **Compute sentiment** to score and visualize.")
