@@ -307,7 +307,7 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
         "Do not copy-paste, quote, or repeat any specific tweet content literally. "
         "Identify key actors, events, conflicts, resolutions, and themes in a concise 1-2 sentence summary (under 50 words). "
         "Suggest a detailed, meaningful label for this narrative (10-20 words). "
-        "Suggest a short 2-4 word label derived from the summary. "
+        "Suggest a short 2-4 word label derived from the summary. Make the short label highly specific and unique by including proper nouns, locations, or distinctive events mentioned in the posts to differentiate from other narratives. Avoid generic terms like 'Security Threat' unless qualified (e.g., 'Mogadishu Infiltration Alert'). Ensure short labels are varied and not repetitive across clusters. "
         "Output format: Summary: [your fresh summary] Detailed Label: [your detailed label] Short Label: [your 2-4 word label]"
         f"Posts:\n{combined_text}"
     )
