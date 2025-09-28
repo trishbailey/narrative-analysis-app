@@ -333,7 +333,7 @@ def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_vol
     Returns a list of bullet points with insights.
     """
     # Prepare input data for Grok
-    narrative_summary = "\n".join([f"Narrative {i+1} ({short_labels_map[cid]}): {narratives[cid]}" for i, cid in enumerate(sorted(narratives.keys()))])
+    narrative_summary = "\n".join([f"Narrative {i+1} ({short_labels_map.get(cid, 'Unknown')}: {narratives.get(cid, 'No summary')}" for i, cid in enumerate(sorted(narratives.keys()))])
     volume_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts" for _, row in volume_data.iterrows()])
     top_authors_volume_summary = "\n".join([f"{row['display_label']}: {row['Volume']} posts" for _, row in top_authors_volume.iterrows()]) if not top_authors_volume.empty else "No top authors by volume."
     top_authors_engagement_summary = "\n".join([f"{row['display_label']}: {row['Engagement']} engagement" for _, row in top_authors_engagement.iterrows()]) if not top_authors_engagement.empty else "No top authors by engagement."
@@ -838,31 +838,32 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 if pd.notna(source):
                     # Retweets
                     if pd.notna(row['Retweets']) and row['Retweets'] > 0:
-                        # Simplified: Assume Retweets indicates influence from original poster (needs Tweet Id for precision)
                         for target in authors:
                             if target != source:  # Avoid self-loops
                                 G.add_edge(source, target, weight=row['Retweets'])
-                    # Replies (simplified; needs threading data for accuracy)
+                    # Replies
                     if pd.notna(row['Replies']) and row['Replies'] > 0:
                         for target in authors:
                             if target != source:
                                 G.add_edge(source, target, weight=row['Replies'])
-                    # Shares (similar simplification)
+                    # Shares
                     if pd.notna(row['Shares']) and row['Shares'] > 0:
                         for target in authors:
                             if target != source:
                                 G.add_edge(source, target, weight=row['Shares'])
             
-            # Remove nodes with no edges if any
+            # Remove nodes with no edges
             G.remove_nodes_from(list(nx.isolates(G)))
             
             if G.number_of_nodes() == 0:
                 st.warning(f"No connections found for {short_label}")
                 return None
             
-            # Compute degree centrality (out-degree for influence)
-            centrality = nx.degree_centrality(G)
-            pos = nx.spring_layout(G)
+            # Compute out-degree centrality for influence
+            centrality = dict(G.out_degree())
+            max_centrality = max(centrality.values()) if centrality else 1
+            pos = nx.spring_layout(G, k=0.5, iterations=50)  # Adjusted for radial influence layout
+            
             edge_x = []
             edge_y = []
             for edge in G.edges():
@@ -880,44 +881,49 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             node_x = []
             node_y = []
             node_text = []
+            node_size = []
             node_color = []
             for node in G.nodes():
                 x, y = pos[node]
                 node_x.append(x)
                 node_y.append(y)
-                centrality_score = centrality[node]
-                node_text.append(f"{node}<br>Influence: {centrality_score:.3f}")
-                # Color by influence (higher centrality = darker blue)
-                node_color.append(min(1, centrality_score * 5))  # Scale to 0-1 for color intensity
+                out_degree = centrality.get(node, 0)
+                influence = out_degree / max_centrality if max_centrality > 0 else 0
+                node_text.append(f"{node}<br>Influence: {influence:.3f}")
+                # Scale node size by influence (10 to 50)
+                node_size.append(10 + 40 * influence)
+                # Color by influence using Viridis
+                node_color.append(influence)
             
             node_trace = go.Scatter(
                 x=node_x, y=node_y,
-                mode='markers+text',
+                mode='markers',
                 hoverinfo='text',
-                text=[node.split('<br>')[0] for node in node_text],  # Show only name on node
-                textposition="top center",
+                text=node_text,
                 marker=dict(
-                    showscale=False,
+                    showscale=True,
                     color=node_color,
-                    colorscale='Blues',
-                    size=10,
+                    colorscale='Viridis',
+                    size=node_size,
+                    colorbar=dict(title="Influence"),
                     line_width=2))
             
             fig = go.Figure(data=[edge_trace, node_trace],
                           layout=go.Layout(
-                              title=f"Network Graph for {short_label}",
+                              title=f"Influence Network for {short_label}",
                               title_font_size=16,
                               showlegend=False,
                               hovermode='closest',
                               margin=dict(b=20, l=5, r=5, t=40),
+                              plot_bgcolor="rgba(247,249,252,0.8)",
+                              paper_bgcolor="rgba(255,255,255,0)",
                               annotations=[dict(
-                                  text="",
+                                  text="Node size and color indicate influence; hover for details.",
                                   showarrow=False,
                                   xref="paper", yref="paper",
                                   x=0.005, y=-0.002)],
                               xaxis=dict(showgrid=False, zeroline=False),
                               yaxis=dict(showgrid=False, zeroline=False)))
-            fig.update_layout(plot_bgcolor="rgba(247,249,252,0.8)")
             return fig
         
         # Generate network graph for each theme
@@ -931,7 +937,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     if narratives and not volume_data.empty:
         takeaways = llm_key_takeaways(
             narratives,
-            short_labels_map,  # Added missing parameter
+            short_labels_map,  # Ensure short_labels_map is passed
             volume_data,
             volume_by_author,
             engagement_by_author,
