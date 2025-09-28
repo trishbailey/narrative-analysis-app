@@ -1,4 +1,9 @@
+import logging
+logging.basicConfig(level=logging.INFO, filename='app.log')
+logger = logging.getLogger(__name__)
+logger.info("App starting")
 import streamlit as st
+logger.info("Streamlit imported")
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -11,11 +16,13 @@ from collections import Counter
 import openai
 import os
 import io
-
-# --- Reusable modules ---
+logger.info("Standard imports complete")
 from narrative.narrative_io import read_csv_auto
 from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
 from narrative.narrative_cluster import run_kmeans, attach_clusters
+logger.info("Custom modules imported")
+st.set_page_config(page_title="Narrative Analysis", layout="wide")
+logger.info("Page config set")
 
 # --- Modified normalize_to_canonical to preserve Influencer, Twitter Screen Name, and engagement metrics ---
 def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
