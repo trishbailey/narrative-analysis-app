@@ -681,11 +681,11 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 orientation='h'
             )
             fig_volume_authors.update_traces(
-                marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9, size=8),  # Smaller bars
+                marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),  # Smaller bars
                 text=volume_by_author['Volume'],
                 textposition='auto'
             )
-            fig_volume_authors.update_layout(
+            fig_volume_authors.update_layout(bargap=0.1, bargroupgap=0.1)
                 font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
                 title=dict(text="Top 10 Posters by Volume", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
                 xaxis=dict(title="Post Count", title_font=dict(size=12), tickfont=dict(size=10)),
@@ -725,11 +725,11 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     orientation='h'
                 )
                 fig_engagement_authors.update_traces(
-                    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9, size=8),  # Smaller bars
+                    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),  # Smaller bars
                     text=engagement_by_author['Engagement'].round(0).astype(int),
                     textposition='auto'
                 )
-                fig_engagement_authors.update_layout(
+                fig_engagement_authors.update_layout(bargap=0.1, bargroupgap=0.1)
                     font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
                     title=dict(text="Top 10 Posters by Engagement", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
                     xaxis=dict(title="Engagement", title_font=dict(size=12), tickfont=dict(size=10)),
