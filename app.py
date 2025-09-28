@@ -438,16 +438,13 @@ else:
 def embed_df_texts(df_in: pd.DataFrame):
     texts = concat_title_snippet(df_in)
     
-    # Use TF-IDF embeddings - effective for clustering without external APIs
     from sklearn.feature_extraction.text import TfidfVectorizer
     
     st.info("Creating embeddings from text features...")
     vectorizer = TfidfVectorizer(
         max_features=300,
         stop_words='english',
-        ngram_range=(1, 2),  # Include bigrams for better context
-        min_df=2,  # Ignore very rare terms
-        max_df=0.95  # Ignore very common terms
+        ngram_range=(1, 2)
     )
     
     embeddings = vectorizer.fit_transform(texts).toarray()
@@ -862,49 +859,52 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                             st.warning(f"No valid data for bar chart of {narrative}")
 
     # Network Graphs by Theme
-    st.subheader("Network Graphs by Theme")
-    if 'author' in dfc.columns and any(col in dfc.columns for col in ['Retweets', 'Replies', 'Shares']):
+   # Network Graphs by Theme (Optional)
+st.subheader("Network Graphs by Theme")
+if 'author' in dfc.columns and any(col in dfc.columns for col in ['Retweets', 'Replies', 'Shares']):
+    if st.button("Generate Network Graphs (may take a moment)"):
         # Function to build network graph for a theme
         def build_network_graph(df, cluster_id, short_label):
-            G = nx.DiGraph()
+            G = nx.Graph()  # Changed to undirected graph
             cluster_df = df[df['Cluster'] == cluster_id].copy()
             
-            # Add nodes (authors)
-            authors = cluster_df['author'].dropna().unique()
-            for author in authors:
-                G.add_node(author)
+            # Only add nodes for authors with significant activity
+            author_activity = cluster_df.groupby('author').agg({
+                'Retweets': 'sum',
+                'Replies': 'sum', 
+                'Shares': 'sum'
+            }).fillna(0)
             
-            # Add edges based on retweets, replies, and shares
-            for index, row in cluster_df.iterrows():
-                source = row['author']
-                if pd.notna(source):
-                    # Retweets
-                    if pd.notna(row['Retweets']) and row['Retweets'] > 0:
-                        for target in authors:
-                            if target != source:  # Avoid self-loops
-                                G.add_edge(source, target, weight=row['Retweets'])
-                    # Replies
-                    if pd.notna(row['Replies']) and row['Replies'] > 0:
-                        for target in authors:
-                            if target != source:
-                                G.add_edge(source, target, weight=row['Replies'])
-                    # Shares
-                    if pd.notna(row['Shares']) and row['Shares'] > 0:
-                        for target in authors:
-                            if target != source:
-                                G.add_edge(source, target, weight=row['Shares'])
+            # Only include authors with some activity
+            active_authors = author_activity[
+                (author_activity['Retweets'] > 0) | 
+                (author_activity['Replies'] > 0) | 
+                (author_activity['Shares'] > 0)
+            ].index.tolist()
             
-            # Remove nodes with no edges
-            G.remove_nodes_from(list(nx.isolates(G)))
-            
-            if G.number_of_nodes() == 0:
-                st.warning(f"No connections found for {short_label}")
+            if len(active_authors) < 2:
+                st.info(f"Not enough active authors for {short_label}")
                 return None
             
-            # Compute out-degree centrality for influence
-            centrality = dict(G.out_degree())
-            max_centrality = max(centrality.values()) if centrality else 1
-            pos = nx.spring_layout(G, k=0.5, iterations=50)  # Adjusted for radial influence layout
+            # Add nodes
+            for author in active_authors[:20]:  # Limit to top 20 authors
+                G.add_node(author)
+            
+            # Create edges based on shared engagement patterns (simplified)
+            for i, author1 in enumerate(active_authors[:20]):
+                for author2 in active_authors[i+1:20]:
+                    # Add edge with weight based on activity similarity
+                    weight = min(author_activity.loc[author1].sum(), 
+                               author_activity.loc[author2].sum()) / 100
+                    if weight > 0.1:  # Only significant connections
+                        G.add_edge(author1, author2, weight=weight)
+            
+            if G.number_of_edges() == 0:
+                st.info(f"No significant connections found for {short_label}")
+                return None
+            
+            # Create visualization
+            pos = nx.spring_layout(G, k=1, iterations=50)
             
             edge_x = []
             edge_y = []
