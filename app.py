@@ -1,10 +1,5 @@
 import os
 import sys
-# Fix for Hugging Face Spaces
-os.makedirs('/home/user/.streamlit', exist_ok=True)
-os.environ['HOME'] = '/home/user'
-os.environ['STREAMLIT_SERVER_HEADLESS'] = 'true'
-os.environ['STREAMLIT_BROWSER_GATHER_USAGE_STATS'] = 'false'
 import streamlit as st
 import pandas as pd
 import numpy as np
