@@ -205,8 +205,9 @@ st.markdown("""
     .stButton>button {
         background-color: #1a3c6d;
         color: white;
-        border-radius: 8px;
-        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        padding: 0.2rem 0.4rem; /* Reduced padding for smaller buttons */
+        font-size: 11px; /* Smaller font */
     }
     .stButton>button:hover {
         background-color: #2e5aa8;
@@ -302,15 +303,19 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
     )
     try:
         response = client.chat.completions.create(
-            model="grok-4-fast-reasoning",
+            model="grok-beta",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0.7
         )
         output = response.choices[0].message.content.strip()
-        summary = output.split("Detailed Label:")[0].replace("Summary: ", "").strip()
-        detailed_label = output.split("Detailed Label:")[1].split("Short Label:")[0].strip()
-        short_label = output.split("Short Label:")[1].strip()
+        # Robust parsing with regex fallback
+        summary_match = re.search(r"Summary:\s*(.*?)(?=\s*Detailed Label:|$)", output, re.DOTALL)
+        detailed_match = re.search(r"Detailed Label:\s*(.*?)(?=\s*Short Label:|$)", output, re.DOTALL)
+        short_match = re.search(r"Short Label:\s*(.*)", output, re.DOTALL)
+        summary = summary_match.group(1).strip() if summary_match else f"Summary for cluster {cid} unavailable"
+        detailed_label = detailed_match.group(1).strip() if detailed_match else f"Narrative {cid}"
+        short_label = short_match.group(1).strip() if short_match else f"Cluster {cid}"
         return summary, detailed_label, short_label
     except Exception as e:
         return f"Error: {e}", f"Narrative {cid}", f"Cluster {cid}"
@@ -348,7 +353,7 @@ def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_vol
     )
     try:
         response = client.chat.completions.create(
-            model="grok-4-fast-reasoning",
+            model="grok-beta",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
             temperature=0.7
@@ -359,6 +364,108 @@ def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_vol
         return takeaways if takeaways else ["- No significant trends identified."]
     except Exception as e:
         return [f"- Error generating takeaways: {e}"]
+# --- Modified: Moved build_network_graph definition higher to fix NameError ---
+def build_network_graph(df, cluster_id, short_label):
+    if 'author' not in df.columns or all(col not in df.columns for col in ['Retweets', 'Replies', 'Shares']):
+        st.warning(f"Missing required columns (author and at least one of Retweets/Replies/Shares) for network graph of {short_label}.")
+        return None
+    G = nx.Graph()  # Undirected graph
+    cluster_df = df[df['Cluster'] == cluster_id].copy()
+   
+    author_activity = cluster_df.groupby('author').agg({
+        'Retweets': 'sum',
+        'Replies': 'sum',
+        'Shares': 'sum'
+    }).fillna(0)
+   
+    active_authors = author_activity[
+        (author_activity['Retweets'] > 0) |
+        (author_activity['Replies'] > 0) |
+        (author_activity['Shares'] > 0)
+    ].index.tolist()
+   
+    if len(active_authors) < 2:
+        st.info(f"Not enough active authors for {short_label}")
+        return None
+   
+    for author in active_authors[:20]:
+        G.add_node(author)
+   
+    for i, author1 in enumerate(active_authors[:20]):
+        for author2 in active_authors[i+1:20]:
+            weight = min(author_activity.loc[author1].sum(),
+                         author_activity.loc[author2].sum()) / 100
+            if weight > 0.1:
+                G.add_edge(author1, author2, weight=weight)
+   
+    if G.number_of_edges() == 0:
+        st.info(f"No significant connections found for {short_label}")
+        return None
+   
+    centrality = nx.degree_centrality(G)
+    max_centrality = max(centrality.values()) if centrality else 0
+   
+    pos = nx.spring_layout(G, k=1, iterations=50)
+   
+    edge_x = []
+    edge_y = []
+    for edge in G.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+   
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='none',
+        mode='lines')
+   
+    node_x = []
+    node_y = []
+    node_text = []
+    node_size = []
+    node_color = []
+    for node in G.nodes():
+        x, y = pos[node]
+        node_x.append(x)
+        node_y.append(y)
+        degree = centrality.get(node, 0)
+        influence = degree / max_centrality if max_centrality > 0 else 0
+        node_text.append(f"{node}<br>Influence: {influence:.3f}")
+        node_size.append(10 + 40 * influence)
+        node_color.append(influence)
+   
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers',
+        hoverinfo='text',
+        text=node_text,
+        marker=dict(
+            showscale=True,
+            color=node_color,
+            colorscale='Viridis',
+            size=node_size,
+            colorbar=dict(title="Influence"),
+            line_width=2))
+   
+    fig = go.Figure(data=[edge_trace, node_trace],
+                    layout=go.Layout(
+                        title=f"Influence Network for {short_label}",
+                        title_font_size=16,
+                        showlegend=False,
+                        hovermode='closest',
+                        margin=dict(b=20, l=5, r=5, t=40),
+                        plot_bgcolor="rgba(247,249,252,0.8)",
+                        paper_bgcolor="rgba(255,255,255,0)",
+                        annotations=[dict(
+                            text="Node size and color indicate influence; hover for details.",
+                            showarrow=False,
+                            xref="paper", yref="paper",
+                            x=0.005, y=-0.002)],
+                        xaxis=dict(showgrid=False, zeroline=False),
+                        yaxis=dict(showgrid=False, zeroline=False)))
+    return fig
 # --- Section 1: Load & Normalize ---
 st.sidebar.header("Load Data")
 uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8 / UTF-16 / TSV)", type=["csv", "tsv"])
@@ -473,6 +580,7 @@ if st.button("Run clustering"):
                 st.session_state["narratives"] = narratives
                 st.session_state["narratives_generated"] = True
                 st.success("Clustering and narrative generation complete.")
+                st.rerun()  # Refresh to update display
             else:
                 st.error("Failed to create embeddings. Check your API key and try again.")
 # --- Custom Color Palette ---
@@ -501,79 +609,80 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     short_labels_map = st.session_state["short_labels_map"]
     narratives = st.session_state["narratives"]
    
-    # Display Narratives with short headers and per-theme network buttons
+    # Debug expander
+    with st.expander("Debug: DataFrame Preview After Clustering"):
+        st.dataframe(dfc.head())
+        st.write(f"Unique clusters: {dfc['Cluster'].unique()}")
+        st.write(f"Short labels map: {short_labels_map}")
+   
+    # Display Narratives with short headers
     st.subheader("Narratives")
     for i, cid in enumerate(sorted(narratives.keys()), start=1):
-        st.write(f"{i}. **{short_labels_map[cid]}**: {narratives[cid]}")
-        # Modified: Add button for network visualization next to each theme
-        if st.button("View Network Visualization", key=f"view_network_{cid}"):
-            with st.spinner("Generating network graph..."):
-                network_fig = build_network_graph(dfc, cid, short_labels_map[cid])
-                if network_fig:
-                    st.plotly_chart(network_fig, config=dict(responsive=True))
-                else:
-                    st.info("No network graph available for this theme.")
+        st.write(f"{i}. **{short_labels_map.get(cid, f'Cluster {cid}')}**: {narratives.get(cid, 'No summary available')}")
    
     # Bar Chart of Narrative Volumes with horizontal short labels
     volume_data = dfc["Cluster"].value_counts().reset_index()
     volume_data.columns = ["Cluster", "Volume"]
     volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
     st.subheader("Narrative Volumes")
-    fig_volumes = px.bar(
-        volume_data,
-        x="Narrative",
-        y="Volume",
-        title="Narrative Volumes",
-        color="Narrative",
-        color_discrete_sequence=COLOR_PALETTE
-    )
-    # Enhance bar chart
-    fig_volumes.update_traces(
-        marker=dict(
-            line=dict(width=1, color='#ffffff'),
-            opacity=0.9
-        ),
-        text="" # Remove text inside boxes
-    )
-    fig_volumes.update_layout(
-        font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-        title=dict(text="Narrative Volumes", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
-        xaxis=dict(
-            title="Narrative",
-            tickangle=0, # Labels straight horizontally
-            title_font=dict(size=14),
-            tickfont=dict(size=10), # Adjust font size to prevent overlap
-            tickmode="array",
-            tickvals=volume_data["Narrative"],
-            ticktext=volume_data["Narrative"]
-        ),
-        yaxis=dict(
-            title="Volume",
-            title_font=dict(size=14),
-            tickfont=dict(size=12),
-            gridcolor="rgba(0,0,0,0.1)"
-        ),
-        plot_bgcolor="rgba(247,249,252,0.8)",
-        paper_bgcolor="rgba(255,255,255,0)",
-        showlegend=True,
-        margin=dict(l=50, r=50, t=80, b=50),
-        hovermode="closest",
-        hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
-    )
-    # Add annotation for highest volume
-    max_volume = volume_data["Volume"].max()
-    max_narrative = volume_data[volume_data["Volume"] == max_volume]["Narrative"].iloc[0]
-    fig_volumes.add_annotation(
-        x=max_narrative,
-        y=max_volume,
-        text=f"Peak: {max_volume}",
-        showarrow=True,
-        arrowhead=2,
-        ax=20,
-        ay=-30,
-        font=dict(size=12, color="#1a3c6d")
-    )
-    st.plotly_chart(fig_volumes, config=dict(responsive=True))
+    if volume_data.empty or volume_data["Narrative"].isna().all():
+        st.warning("No volume data available. Check if clusters were assigned or labels generated properly.")
+    else:
+        fig_volumes = px.bar(
+            volume_data,
+            x="Narrative",
+            y="Volume",
+            title="Narrative Volumes",
+            color="Narrative",
+            color_discrete_sequence=COLOR_PALETTE
+        )
+        # Enhance bar chart
+        fig_volumes.update_traces(
+            marker=dict(
+                line=dict(width=1, color='#ffffff'),
+                opacity=0.9
+            ),
+            text="" # Remove text inside boxes
+        )
+        fig_volumes.update_layout(
+            font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
+            title=dict(text="Narrative Volumes", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
+            xaxis=dict(
+                title="Narrative",
+                tickangle=0, # Labels straight horizontally
+                title_font=dict(size=14),
+                tickfont=dict(size=10), # Adjust font size to prevent overlap
+                tickmode="array",
+                tickvals=volume_data["Narrative"],
+                ticktext=volume_data["Narrative"]
+            ),
+            yaxis=dict(
+                title="Volume",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                gridcolor="rgba(0,0,0,0.1)"
+            ),
+            plot_bgcolor="rgba(247,249,252,0.8)",
+            paper_bgcolor="rgba(255,255,255,0)",
+            showlegend=True,
+            margin=dict(l=50, r=50, t=80, b=50),
+            hovermode="closest",
+            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
+        )
+        # Add annotation for highest volume
+        max_volume = volume_data["Volume"].max()
+        max_narrative = volume_data[volume_data["Volume"] == max_volume]["Narrative"].iloc[0]
+        fig_volumes.add_annotation(
+            x=max_narrative,
+            y=max_volume,
+            text=f"Peak: {max_volume}",
+            showarrow=True,
+            arrowhead=2,
+            ax=20,
+            ay=-30,
+            font=dict(size=12, color="#1a3c6d")
+        )
+        st.plotly_chart(fig_volumes, config=dict(responsive=True))
    
     # Timeline of Narratives (Volume Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
@@ -701,51 +810,56 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
        
         # Volume Bar Chart
         with col1:
-            fig_volume_authors = px.bar(
-                volume_by_author,
-                x='Volume',
-                y='display_label',
-                title="Top 10 Posters by Volume",
-                color='display_label',
-                color_discrete_sequence=COLOR_PALETTE,
-                orientation='h'
-            )
-            fig_volume_authors.update_traces(
-                marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),
-                text=volume_by_author['Volume'],
-                textposition='auto'
-            )
-            fig_volume_authors.update_layout(bargap=0.1, bargroupgap=0.1)
-            fig_volume_authors.update_layout(
-                font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-                title=dict(text="Top 10 Posters by Volume", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
-                xaxis=dict(title="Post Count", title_font=dict(size=12), tickfont=dict(size=10)),
-                yaxis=dict(title="Poster", title_font=dict(size=12), tickfont=dict(size=10)),
-                plot_bgcolor="rgba(247,249,252,0.8)",
-                paper_bgcolor="rgba(255,255,255,0)",
-                showlegend=False,
-                margin=dict(l=30, r=30, t=40, b=30),
-                hovermode="closest",
-                hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
-            )
-            if not volume_by_author.empty:
-                max_volume_author = volume_by_author.iloc[0]['display_label']
-                max_volume_value = volume_by_author.iloc[0]['Volume']
-                fig_volume_authors.add_annotation(
-                    x=max_volume_value,
-                    y=max_volume_author,
-                    text=f"Top: {max_volume_value}",
-                    showarrow=True,
-                    arrowhead=2,
-                    ax=20,
-                    ay=-30,
-                    font=dict(size=10, color="#1a3c6d")
+            if volume_by_author.empty:
+                st.warning("No data for top posters by volume.")
+            else:
+                fig_volume_authors = px.bar(
+                    volume_by_author,
+                    x='Volume',
+                    y='display_label',
+                    title="Top 10 Posters by Volume",
+                    color='display_label',
+                    color_discrete_sequence=COLOR_PALETTE,
+                    orientation='h'
                 )
-            st.plotly_chart(fig_volume_authors, config=dict(responsive=True))
+                fig_volume_authors.update_traces(
+                    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),
+                    text=volume_by_author['Volume'],
+                    textposition='auto'
+                )
+                fig_volume_authors.update_layout(bargap=0.1, bargroupgap=0.1)
+                fig_volume_authors.update_layout(
+                    font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
+                    title=dict(text="Top 10 Posters by Volume", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
+                    xaxis=dict(title="Post Count", title_font=dict(size=12), tickfont=dict(size=10)),
+                    yaxis=dict(title="Poster", title_font=dict(size=12), tickfont=dict(size=10)),
+                    plot_bgcolor="rgba(247,249,252,0.8)",
+                    paper_bgcolor="rgba(255,255,255,0)",
+                    showlegend=False,
+                    margin=dict(l=30, r=30, t=40, b=30),
+                    hovermode="closest",
+                    hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
+                )
+                if not volume_by_author.empty:
+                    max_volume_author = volume_by_author.iloc[0]['display_label']
+                    max_volume_value = volume_by_author.iloc[0]['Volume']
+                    fig_volume_authors.add_annotation(
+                        x=max_volume_value,
+                        y=max_volume_author,
+                        text=f"Top: {max_volume_value}",
+                        showarrow=True,
+                        arrowhead=2,
+                        ax=20,
+                        ay=-30,
+                        font=dict(size=10, color="#1a3c6d")
+                    )
+                st.plotly_chart(fig_volume_authors, config=dict(responsive=True))
        
         # Engagement Bar Chart
         with col2:
-            if not engagement_by_author.empty:
+            if engagement_by_author.empty:
+                st.warning("No data for top posters by engagement.")
+            else:
                 fig_engagement_authors = px.bar(
                     engagement_by_author,
                     x='Engagement',
@@ -803,7 +917,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         # Create two-column layout for bar charts
         for i in range(0, len(top_authors_per_theme), 2):
             cols = st.columns(2)
-            narratives_list = list(top_authors_per_theme.keys())  # Renamed to avoid conflict with 'narratives'
+            narratives_list = list(top_authors_per_theme.keys())  # Renamed to avoid conflict
             for j, col in enumerate(cols):
                 idx = i + j
                 if idx < len(narratives_list):
@@ -847,115 +961,14 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                                 st.warning(f"Invalid numeric data for {narrative} bar chart. Check PostCount values.")
                         else:
                             st.warning(f"No valid data for bar chart of {narrative}")
-    # Modified: Removed global network generation button; now per-theme in Narratives section above
-    # Function to build network graph for a theme (moved up for accessibility)
-    def build_network_graph(df, cluster_id, short_label):
-        G = nx.Graph()  # Changed to undirected graph
-        cluster_df = df[df['Cluster'] == cluster_id].copy()
-   
-        # Only add nodes for authors with significant activity
-        author_activity = cluster_df.groupby('author').agg({
-            'Retweets': 'sum',
-            'Replies': 'sum',
-            'Shares': 'sum'
-        }).fillna(0)
-   
-        # Only include authors with some activity
-        active_authors = author_activity[
-            (author_activity['Retweets'] > 0) |
-            (author_activity['Replies'] > 0) |
-            (author_activity['Shares'] > 0)
-        ].index.tolist()
-   
-        if len(active_authors) < 2:
-            st.info(f"Not enough active authors for {short_label}")
-            return None
-   
-        # Add nodes
-        for author in active_authors[:20]:  # Limit to top 20 authors
-            G.add_node(author)
-   
-        # Create edges based on shared engagement patterns (simplified)
-        for i, author1 in enumerate(active_authors[:20]):
-            for author2 in active_authors[i+1:20]:
-                # Add edge with weight based on activity similarity
-                weight = min(author_activity.loc[author1].sum(),
-                             author_activity.loc[author2].sum()) / 100
-                if weight > 0.1:  # Only significant connections
-                    G.add_edge(author1, author2, weight=weight)
-   
-        if G.number_of_edges() == 0:
-            st.info(f"No significant connections found for {short_label}")
-            return None
-   
-        # Fixed: Compute centrality here
-        centrality = nx.degree_centrality(G)
-        max_centrality = max(centrality.values()) if centrality else 0
-   
-        # Create visualization
-        pos = nx.spring_layout(G, k=1, iterations=50)
-   
-        edge_x = []
-        edge_y = []
-        for edge in G.edges():
-            x0, y0 = pos[edge[0]]
-            x1, y1 = pos[edge[1]]
-            edge_x.extend([x0, x1, None])
-            edge_y.extend([y0, y1, None])
-   
-        edge_trace = go.Scatter(
-            x=edge_x, y=edge_y,
-            line=dict(width=0.5, color='#888'),
-            hoverinfo='none',
-            mode='lines')
-   
-        node_x = []
-        node_y = []
-        node_text = []
-        node_size = []
-        node_color = []
-        for node in G.nodes():
-            x, y = pos[node]
-            node_x.append(x)
-            node_y.append(y)
-            degree = centrality.get(node, 0)  # Renamed from out_degree for undirected graph
-            influence = degree / max_centrality if max_centrality > 0 else 0
-            node_text.append(f"{node}<br>Influence: {influence:.3f}")
-            # Scale node size by influence (10 to 50)
-            node_size.append(10 + 40 * influence)
-            # Color by influence using Viridis
-            node_color.append(influence)
-   
-        node_trace = go.Scatter(
-            x=node_x, y=node_y,
-            mode='markers',
-            hoverinfo='text',
-            text=node_text,
-            marker=dict(
-                showscale=True,
-                color=node_color,
-                colorscale='Viridis',
-                size=node_size,
-                colorbar=dict(title="Influence"),
-                line_width=2))
-   
-        fig = go.Figure(data=[edge_trace, node_trace],
-                        layout=go.Layout(
-                            title=f"Influence Network for {short_label}",
-                            title_font_size=16,
-                            showlegend=False,
-                            hovermode='closest',
-                            margin=dict(b=20, l=5, r=5, t=40),
-                            plot_bgcolor="rgba(247,249,252,0.8)",
-                            paper_bgcolor="rgba(255,255,255,0)",
-                            annotations=[dict(
-                                text="Node size and color indicate influence; hover for details.",
-                                showarrow=False,
-                                xref="paper", yref="paper",
-                                x=0.005, y=-0.002)],
-                            xaxis=dict(showgrid=False, zeroline=False),
-                            yaxis=dict(showgrid=False, zeroline=False)))
-        return fig
+                    # Add network button here
+                    if st.button("View Network Visualization", key=f"view_network_{idx}"):
+                        with st.spinner("Generating network graph..."):
+                            network_fig = build_network_graph(dfc, author_counts[author_counts['Narrative'] == narrative]['Cluster'].iloc[0], narrative)
+                            if network_fig:
+                                st.plotly_chart(network_fig, config=dict(responsive=True))
+                            else:
+                                st.info("No network graph available for this theme.")
     # Wut Means? Key Takeaways
     st.subheader("Wut Means? 🤔 Key Takeaways")
     if narratives and not volume_data.empty:
