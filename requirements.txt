@@ -1,11 +1,13 @@
-sentence-transformers
-scikit-learn
+streamlit==1.28.1
 pandas
-plotly
-umap-learn
-nltk
-scipy
-openai
-streamlit
 numpy
+plotly
 networkx
+scikit-learn
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.0.1+cpu
+sentence-transformers
+openai
+scipy
+nltk
+umap-learn
