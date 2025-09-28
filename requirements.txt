@@ -4,10 +4,11 @@ numpy
 plotly
 networkx
 scikit-learn
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.0.1+cpu
-sentence-transformers
-openai
 scipy
 nltk
+openai
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.1.0+cpu
+transformers==4.36.0
+sentence-transformers==2.2.2
 umap-learn
