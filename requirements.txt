@@ -5,3 +5,9 @@ plotly==6.3.0
 scikit-learn==1.7.2
 sentence-transformers==5.1.1
 openai==1.109.1
+torch==2.8.0
+transformers==4.56.2
+scipy==1.16.2
+huggingface-hub==0.35.1
+python-dateutil==2.9.0.post0
+tqdm==4.67.1
