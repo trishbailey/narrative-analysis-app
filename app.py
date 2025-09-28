@@ -754,7 +754,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 )
                 st.plotly_chart(fig_engagement_authors, config=dict(responsive=True))
 
-    # Author-Theme Top Contributors
+    # Top Authors by Theme Bar Charts
     st.subheader("Top Authors by Theme")
     if 'author' in dfc.columns:
         # Group by Cluster and author to count posts
@@ -768,12 +768,36 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             if not theme_data.empty:
                 top_authors_per_theme[narrative] = theme_data[['author', 'PostCount']].values.tolist()
         
-        # Display top authors for each theme
+        # Create bar charts for each theme
         for narrative, authors in top_authors_per_theme.items():
-            st.write(f"**{narrative}**")
-            for author, count in authors:
-                st.write(f"- {author} ({count} posts)")
-            st.write("---")  # Separator between themes
+            if authors:
+                df_theme = pd.DataFrame(authors, columns=['author', 'PostCount'])
+                fig = px.bar(
+                    df_theme,
+                    x='author',
+                    y='PostCount',
+                    title=f"Top Authors for {narrative}",
+                    color='author',
+                    color_discrete_sequence=COLOR_PALETTE[:len(authors)],
+                    text='PostCount',
+                    textposition='auto'
+                )
+                fig.update_traces(
+                    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9)
+                )
+                fig.update_layout(
+                    font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
+                    title=dict(text=f"Top Authors for {narrative}", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
+                    xaxis=dict(title="Author", title_font=dict(size=12), tickfont=dict(size=10)),
+                    yaxis=dict(title="Post Count", title_font=dict(size=12), tickfont=dict(size=10), gridcolor="rgba(0,0,0,0.1)"),
+                    plot_bgcolor="rgba(247,249,252,0.8)",
+                    paper_bgcolor="rgba(255,255,255,0)",
+                    showlegend=False,
+                    margin=dict(l=50, r=50, t=50, b=50),
+                    hovermode="closest",
+                    hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
+                )
+                st.plotly_chart(fig, config=dict(responsive=True))
 
     # Wut Means? Key Takeaways
     st.subheader("Wut Means? 🤔 Key Takeaways")
