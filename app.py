@@ -887,19 +887,19 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 G = nx.Graph()  # Changed to undirected graph
                 cluster_df = df[df['Cluster'] == cluster_id].copy()
             
-            # Only add nodes for authors with significant activity
-            author_activity = cluster_df.groupby('author').agg({
-                'Retweets': 'sum',
-                'Replies': 'sum', 
-                'Shares': 'sum'
-            }).fillna(0)
+                # Only add nodes for authors with significant activity
+                author_activity = cluster_df.groupby('author').agg({
+                    'Retweets': 'sum',
+                    'Replies': 'sum', 
+                    'Shares': 'sum'
+                }).fillna(0)
             
-            # Only include authors with some activity
-            active_authors = author_activity[
-                (author_activity['Retweets'] > 0) | 
-                (author_activity['Replies'] > 0) | 
-                (author_activity['Shares'] > 0)
-            ].index.tolist()
+                # Only include authors with some activity
+                active_authors = author_activity[
+                    (author_activity['Retweets'] > 0) | 
+                    (author_activity['Replies'] > 0) | 
+                    (author_activity['Shares'] > 0)
+                ].index.tolist()
             
             if len(active_authors) < 2:
                 st.info(f"Not enough active authors for {short_label}")
