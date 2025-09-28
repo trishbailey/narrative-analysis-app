@@ -270,7 +270,7 @@ st.markdown("""
 st.title("Narrative Analysis")
 
 # --- API Setup ---
-api_key = os.getenv("XAI_API_KEY") or st.secrets.get("XAI_API_KEY")
+api_key = os.getenv("XAI_API_KEY")
 if not api_key:
     st.error("XAI_API_KEY not found. Please add it in Streamlit Secrets.")
 else:
