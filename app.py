@@ -327,7 +327,7 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
     except Exception as e:
         return f"Error: {e}", f"Narrative {cid}", f"Cluster {cid}"
 
-def llm_key_takeaways(narratives, volume_data, top_authors_volume, top_authors_engagement, correlation_data, timeline_data=None):
+def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_volume, top_authors_engagement, correlation_data, timeline_data=None):
     """
     Generate AI-driven key takeaways using Grok based on narratives, volumes, top posters, and correlations.
     Returns a list of bullet points with insights.
@@ -931,6 +931,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     if narratives and not volume_data.empty:
         takeaways = llm_key_takeaways(
             narratives,
+            short_labels_map,  # Added missing parameter
             volume_data,
             volume_by_author,
             engagement_by_author,
