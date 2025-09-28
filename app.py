@@ -16,6 +16,7 @@ from collections import Counter
 import openai
 import os
 import io
+import time
 logger.info("Standard imports complete")
 try:
     from narrative.narrative_io import read_csv_auto
@@ -33,6 +34,7 @@ try:
     logger.info("Page config set")
 except Exception as e:
     logger.error(f"Error setting page config: {e}")
+    st.error(f"Error setting page config: {e}")
     raise
 
 # Custom CSS for a polished look with updated sidebar background
@@ -127,6 +129,148 @@ except Exception as e:
     st.error(f"Error in API setup: {e}")
     raise
 
+# --- Modified normalize_to_canonical to preserve Influencer, Twitter Screen Name, and engagement metrics ---
+def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
+    logger.info("Normalizing DataFrame")
+    try:
+        norm2orig: dict[str, str] = {}
+        cols_norm: list[str] = []
+        for c in df_raw.columns:
+            k = re.sub(r"\s+|_", "", c.strip().lower())
+            norm2orig[k] = c
+            cols_norm.append(k)
+        ALIASES = {
+            "title": ["title", "headline", "headlines", "inputname", "keywords"],
+            "snippet": ["snippet", "summary", "description", "dek", "selftext", "selftext_html", "body", "text", "openingtext", "hitsentence"],
+            "date": ["date", "published", "pubdate", "time", "created", "created_iso", "created_utc", "alternatedateformat"],
+            "url": ["url", "link", "permalink", "parenturl"],
+            "author": ["author", "influencer"],
+            "display_name": ["twitter screen name"],
+            "likes": ["likes", "Likes"],
+            "retweets": ["retweets", "Retweets"],
+            "replies": ["replies", "Replies"],
+            "comments": ["comments", "Comments"],
+            "shares": ["shares", "Shares"],
+            "reactions": ["reactions", "Reactions"]
+        }
+        title_key = next((k for k in ALIASES["title"] if k in norm2orig), None)
+        snippet_key = next((k for k in ALIASES["snippet"] if k in norm2orig), None)
+        date_key = next((k for k in ALIASES["date"] if k in norm2orig), None)
+        url_key = next((k for k in ALIASES["url"] if k in norm2orig), None)
+        author_key = next((k for k in ALIASES["author"] if k in norm2orig), None)
+        display_name_key = next((k for k in ALIASES["display_name"] if k in norm2orig), None)
+        likes_key = next((k for k in ALIASES["likes"] if k in norm2orig), None)
+        retweets_key = next((k for k in ALIASES["retweets"] if k in norm2orig), None)
+        replies_key = next((k for k in ALIASES["replies"] if k in norm2orig), None)
+        comments_key = next((k for k in ALIASES["comments"] if k in norm2orig), None)
+        shares_key = next((k for k in ALIASES["shares"] if k in norm2orig), None)
+        reactions_key = next((k for k in ALIASES["reactions"] if k in norm2orig), None)
+        headline = norm2orig.get("headline")
+        hitsent = norm2orig.get("hitsentence")
+        opentxt = norm2orig.get("openingtext")
+        inputname = norm2orig.get("inputname")
+        keywords = norm2orig.get("keywords")
+        if headline:
+            title_series = df_raw[headline].fillna("").astype(str).str.strip()
+        elif hitsent:
+            title_series = df_raw[hitsent].fillna("").astype(str).str.strip()
+        elif opentxt:
+            title_series = df_raw[opentxt].fillna("").astype(str).str.strip()
+        elif inputname:
+            title_series = df_raw[inputname].fillna("").astype(str).str.strip()
+        elif keywords:
+            title_series = df_raw[keywords].fillna("").astype(str).str.strip()
+        else:
+            title_series = pd.Series([""] * len(df_raw), dtype=object)
+            for k in ALIASES["title"]:
+                if k in norm2orig:
+                    s = df_raw[norm2orig[k]].fillna("").astype(str).str.strip()
+                    title_series = title_series.mask(~title_series.astype(bool), s)
+        if opentxt:
+            snippet_series = df_raw[opentxt].fillna("").astype(str).str.strip()
+        elif hitsent:
+            snippet_series = df_raw[hitsent].fillna("").astype(str).str.strip()
+        elif headline:
+            snippet_series = df_raw[headline].fillna("").astype(str).str.strip()
+        else:
+            snippet_series = pd.Series([""] * len(df_raw), dtype=object)
+            for k in ALIASES["snippet"]:
+                if k in norm2orig:
+                    s = df_raw[norm2orig[k]].fillna("").astype(str).str.strip()
+                    snippet_series = snippet_series.mask(~snippet_series.astype(bool), s)
+        def _parse_meltwater_datetime(df: pd.DataFrame, norm2orig: dict) -> pd.Series:
+            def _coerce(s: pd.Series) -> pd.Series:
+                s = s.astype(str).str.replace(r'(?i)(am|pm)$', r' \1', regex=True)
+                formats = [
+                    "%d-%b-%Y %I:%M%p",
+                    "%Y-%m-%d %H:%M:%S",
+                    "%m/%d/%Y %I:%M %p",
+                    "%d/%m/%Y %H:%M"
+                ]
+                result = pd.Series(pd.NaT, index=s.index)
+                for fmt in formats:
+                    temp = pd.to_datetime(s, errors="coerce", format=fmt, dayfirst=True)
+                    result = result.fillna(temp)
+                if result.isna().any():
+                    temp = pd.to_datetime(s, errors="coerce", dayfirst=True)
+                    result = result.fillna(temp)
+                return result
+            date_col = norm2orig.get("date")
+            alt_col = norm2orig.get("alternatedateformat")
+            time_col = norm2orig.get("time")
+            if date_col:
+                d = _coerce(df[date_col])
+            else:
+                d = pd.Series(pd.NaT, index=df.index)
+            need = d.isna()
+            if need.any() and (alt_col or time_col):
+                alt = df[norm2orig.get("alternatedateformat", "")].astype(str).str.strip() if alt_col else ""
+                tim = df[norm2orig.get("time", "")].astype(str).str.strip() if time_col else ""
+                combo = (alt + " " + tim).str.strip()
+                d2 = _coerce(combo)
+                d = d.fillna(d2)
+            return d
+        if date_key:
+            date_series = _parse_meltwater_datetime(df_raw, norm2orig)
+        else:
+            date_series = _parse_meltwater_datetime(df_raw, norm2orig)
+        if "parenturl" in norm2orig:
+            url_series = df_raw[norm2orig["parenturl"]].fillna("").astype(str).str.strip()
+        elif url_key:
+            url_series = df_raw[norm2orig[url_key]].fillna("").astype(str).str.strip()
+        else:
+            url_series = pd.Series([""] * len(df_raw), dtype=object)
+        author_series = df_raw[norm2orig[author_key]].fillna("").astype(str).str.strip() if author_key else pd.Series([""] * len(df_raw), dtype=object)
+        display_name_series = df_raw[norm2orig[display_name_key]].fillna("").astype(str).str.strip() if display_name_key else pd.Series([""] * len(df_raw), dtype=object)
+        likes_series = df_raw[norm2orig[likes_key]].fillna(0).astype(float) if likes_key else pd.Series([0] * len(df_raw), dtype=float)
+        retweets_series = df_raw[norm2orig[retweets_key]].fillna(0).astype(float) if retweets_key else pd.Series([0] * len(df_raw), dtype=float)
+        replies_series = df_raw[norm2orig[replies_key]].fillna(0).astype(float) if replies_key else pd.Series([0] * len(df_raw), dtype=float)
+        comments_series = df_raw[norm2orig[comments_key]].fillna(0).astype(float) if comments_key else pd.Series([0] * len(df_raw), dtype=float)
+        shares_series = df_raw[norm2orig[shares_key]].fillna(0).astype(float) if shares_key else pd.Series([0] * len(df_raw), dtype=float)
+        reactions_series = df_raw[norm2orig[reactions_key]].fillna(0).astype(float) if reactions_key else pd.Series([0] * len(df_raw), dtype=float)
+        df = pd.DataFrame({
+            "Title": title_series,
+            "Snippet": snippet_series,
+            "Date": date_series,
+            "URL": url_series,
+            "author": author_series,
+            "display_name": display_name_series,
+            "Likes": likes_series,
+            "Retweets": retweets_series,
+            "Replies": replies_series,
+            "Comments": comments_series,
+            "Shares": shares_series,
+            "Reactions": reactions_series
+        })
+        df = df[(df["Title"].str.len() > 0) | (df["Snippet"].str.len() > 0)].copy()
+        df.drop_duplicates(subset=["Title", "Snippet"], inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        logger.info("DataFrame normalized")
+        return df
+    except Exception as e:
+        logger.error(f"Error normalizing DataFrame: {e}")
+        raise
+
 # --- Helpers ---
 JUNK = {
     "rt", "please", "join", "join me", "link", "watch", "live", "breaking", "thanks", "thank", "proud",
@@ -138,95 +282,118 @@ STOP = set(ENGLISH_STOP_WORDS) | {w for p in JUNK for w in p.split()}
 logger.info("Helper variables defined")
 
 def first_sentence(text: str, max_len=180) -> str:
-    text = str(text or "").strip()
-    parts = re.split(r"(?<=[\.!?])\s+", text)
-    for s in parts:
-        s = s.strip()
-        if len(s) >= 25:
-            return s[:max_len]
-    return (text[:max_len] or "").strip()
+    logger.info("Extracting first sentence")
+    try:
+        text = str(text or "").strip()
+        parts = re.split(r"(?<=[\.!?])\s+", text)
+        for s in parts:
+            s = s.strip()
+            if len(s) >= 25:
+                return s[:max_len]
+        return (text[:max_len] or "").strip()
+    except Exception as e:
+        logger.error(f"Error in first_sentence: {e}")
+        return ""
 
 def central_indexes(emb, mask_idx, k=5):
     logger.info("Computing central indexes")
-    sub = emb[mask_idx]
-    if len(sub) == 0:
-        logger.warning("Empty sub-embeddings")
+    try:
+        sub = emb[mask_idx]
+        if len(sub) == 0:
+            logger.warning("Empty sub-embeddings")
+            return []
+        centroid = sub.mean(axis=0, keepdims=True)
+        sims = (centroid @ sub.T).ravel()
+        order = sims.argsort()[::-1][:min(k, len(sims))]
+        logger.info("Central indexes computed")
+        return [mask_idx[i] for i in order]
+    except Exception as e:
+        logger.error(f"Error in central_indexes: {e}")
         return []
-    centroid = sub.mean(axis=0, keepdims=True)
-    sims = (centroid @ sub.T).ravel()
-    order = sims.argsort()[::-1][:min(k, len(sims))]
-    logger.info("Central indexes computed")
-    return [mask_idx[i] for i in order]
 
 def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
     logger.info(f"Generating summary for cluster {cid}")
-    combined_text = "\n\n".join(texts)
-    prompt = (
-        "Create a fresh, original summary of the main gist of these social media posts clustered around a theme. "
-        "Do not copy-paste, quote, or repeat any specific tweet content literally. "
-        "Identify key actors, events, conflicts, resolutions, and themes in a concise 1-2 sentence summary (under 50 words). "
-        "Suggest a detailed, meaningful label for this narrative (10-20 words). "
-        "Suggest a short 2-4 word label derived from the summary. Make the short label highly specific and unique by including proper nouns, locations, or distinctive events mentioned in the posts to differentiate from other narratives. Avoid generic terms like 'Security Threat' unless qualified (e.g., 'Mogadishu Infiltration Alert'). Ensure short labels are varied and not repetitive across clusters. "
-        f"Output format: Summary: [your fresh summary] Detailed Label: [your detailed label] Short Label: [your 2-4 word label]\nPosts:\n{combined_text}"
-    )
-    for attempt in range(3):
-        try:
-            response = client.chat.completions.create(
-                model="grok-4-fast-reasoning",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=200,
-                temperature=0.7
-            )
-            output = response.choices[0].message.content.strip()
-            summary = output.split("Detailed Label:")[0].replace("Summary: ", "").strip()
-            detailed_label = output.split("Detailed Label:")[1].split("Short Label:")[0].strip()
-            short_label = output.split("Short Label:")[1].strip()
-            logger.info(f"Summary generated for cluster {cid}")
-            return summary, detailed_label, short_label
-        except openai.RateLimitError:
-            logger.warning(f"Rate limit hit for cluster {cid}, retrying in {2 ** attempt} seconds...")
-            time.sleep(2 ** attempt)
-        except Exception as e:
-            logger.error(f"Error in llm_narrative_summary for cluster {cid}: {e}")
-            return f"Error: {e}", f"Narrative {cid}", f"Cluster {cid}"
-    logger.error(f"Rate limit exceeded for cluster {cid}")
-    return "Error: Rate limit exceeded", f"Narrative {cid}", f"Cluster {cid}"
+    try:
+        combined_text = "\n\n".join(texts)
+        prompt = (
+            "Create a fresh, original summary of the main gist of these social media posts clustered around a theme. "
+            "Do not copy-paste, quote, or repeat any specific tweet content literally. "
+            "Identify key actors, events, conflicts, resolutions, and themes in a concise 1-2 sentence summary (under 50 words). "
+            "Suggest a detailed, meaningful label for this narrative (10-20 words). "
+            "Suggest a short 2-4 word label derived from the summary. Make the short label highly specific and unique by including proper nouns, locations, or distinctive events mentioned in the posts to differentiate from other narratives. Avoid generic terms like 'Security Threat' unless qualified (e.g., 'Mogadishu Infiltration Alert'). Ensure short labels are varied and not repetitive across clusters. "
+            f"Output format: Summary: [your fresh summary] Detailed Label: [your detailed label] Short Label: [your 2-4 word label]\nPosts:\n{combined_text}"
+        )
+        for attempt in range(3):
+            try:
+                response = client.chat.completions.create(
+                    model="grok-4-fast-reasoning",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=200,
+                    temperature=0.7
+                )
+                output = response.choices[0].message.content.strip()
+                summary = output.split("Detailed Label:")[0].replace("Summary: ", "").strip()
+                detailed_label = output.split("Detailed Label:")[1].split("Short Label:")[0].strip()
+                short_label = output.split("Short Label:")[1].strip()
+                logger.info(f"Summary generated for cluster {cid}")
+                return summary, detailed_label, short_label
+            except openai.RateLimitError:
+                logger.warning(f"Rate limit hit for cluster {cid}, retrying in {2 ** attempt} seconds...")
+                time.sleep(2 ** attempt)
+            except Exception as e:
+                logger.error(f"Error in llm_narrative_summary for cluster {cid}: {e}")
+                return f"Error: {e}", f"Narrative {cid}", f"Cluster {cid}"
+        logger.error(f"Rate limit exceeded for cluster {cid}")
+        return "Error: Rate limit exceeded", f"Narrative {cid}", f"Cluster {cid}"
+    except Exception as e:
+        logger.error(f"Error in llm_narrative_summary setup: {e}")
+        return f"Error: {e}", f"Narrative {cid}", f"Cluster {cid}"
 
 def llm_key_takeaways(narratives, volume_data, top_authors_volume, top_authors_engagement, correlation_data, timeline_data=None):
     logger.info("Generating key takeaways")
-    narrative_summary = "\n".join([f"Narrative {i+1} ({short_labels_map[cid]}): {narratives[cid]}" for i, cid in enumerate(sorted(narratives.keys()))])
-    volume_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts" for _, row in volume_data.iterrows()])
-    top_authors_volume_summary = "\n".join([f"{row['display_label']}: {row['Volume']} posts" for _, row in top_authors_volume.iterrows()]) if not top_authors_volume.empty else "No top authors by volume."
-    top_authors_engagement_summary = "\n".join([f"{row['display_label']}: {row['Engagement']} engagement" for _, row in top_authors_engagement.iterrows()]) if not top_authors_engagement.empty else "No top authors by engagement."
-    correlation_summary = "\n".join([f"{author}: {', '.join([f'{col}: {val}' for col, val in correlation_data.loc[author].items() if val > 0])}" for author in correlation_data.index]) if not correlation_data.empty else "No author-theme correlations."
-    timeline_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts on {row[date_column].strftime('%Y-%m-%d')}" for _, row in timeline_data.iterrows()]) if timeline_data is not None and not timeline_data.empty else "No timeline data."
-    prompt = (
-        "Analyze the following social media data to identify 3-5 key takeaways about significant trends and insights. "
-        "Focus on dominant narratives, influential posters, engagement patterns, and author-theme correlations. "
-        "Provide concise bullet points (each under 50 words) explaining the 'so what' of the data. "
-        "Do not quote specific posts or data verbatim, but interpret the overall trends. "
-        f"Narratives:\n{narrative_summary}\n\n"
-        f"Narrative Volumes:\n{volume_summary}\n\n"
-        f"Top Posters by Volume:\n{top_authors_volume_summary}\n\n"
-        f"Top Posters by Engagement:\n{top_authors_engagement_summary}\n\n"
-        f"Author-Theme Correlations:\n{correlation_summary}\n\n"
-        f"Timeline Trends:\n{timeline_summary}\n\n"
-        "Output format: - Insight 1\n- Insight 2\n- Insight 3\n..."
-    )
     try:
-        response = client.chat.completions.create(
-            model="grok-4-fast-reasoning",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=300,
-            temperature=0.7
+        narrative_summary = "\n".join([f"Narrative {i+1} ({short_labels_map[cid]}): {narratives[cid]}" for i, cid in enumerate(sorted(narratives.keys()))])
+        volume_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts" for _, row in volume_data.iterrows()])
+        top_authors_volume_summary = "\n".join([f"{row['display_label']}: {row['Volume']} posts" for _, row in top_authors_volume.iterrows()]) if not top_authors_volume.empty else "No top authors by volume."
+        top_authors_engagement_summary = "\n".join([f"{row['display_label']}: {row['Engagement']} engagement" for _, row in top_authors_engagement.iterrows()]) if not top_authors_engagement.empty else "No top authors by engagement."
+        correlation_summary = "\n".join([f"{author}: {', '.join([f'{col}: {val}' for col, val in correlation_data.loc[author].items() if val > 0])}" for author in correlation_data.index]) if not correlation_data.empty else "No author-theme correlations."
+        timeline_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts on {row[date_column].strftime('%Y-%m-%d')}" for _, row in timeline_data.iterrows()]) if timeline_data is not None and not timeline_data.empty else "No timeline data."
+        prompt = (
+            "Analyze the following social media data to identify 3-5 key takeaways about significant trends and insights. "
+            "Focus on dominant narratives, influential posters, engagement patterns, and author-theme correlations. "
+            "Provide concise bullet points (each under 50 words) explaining the 'so what' of the data. "
+            "Do not quote specific posts or data verbatim, but interpret the overall trends. "
+            f"Narratives:\n{narrative_summary}\n\n"
+            f"Narrative Volumes:\n{volume_summary}\n\n"
+            f"Top Posters by Volume:\n{top_authors_volume_summary}\n\n"
+            f"Top Posters by Engagement:\n{top_authors_engagement_summary}\n\n"
+            f"Author-Theme Correlations:\n{correlation_summary}\n\n"
+            f"Timeline Trends:\n{timeline_summary}\n\n"
+            "Output format: - Insight 1\n- Insight 2\n- Insight 3\n..."
         )
-        output = response.choices[0].message.content.strip()
-        takeaways = [line.strip() for line in output.split("\n") if line.strip().startswith("-")]
-        logger.info("Key takeaways generated")
-        return takeaways if takeaways else ["- No significant trends identified."]
+        for attempt in range(3):
+            try:
+                response = client.chat.completions.create(
+                    model="grok-4-fast-reasoning",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=300,
+                    temperature=0.7
+                )
+                output = response.choices[0].message.content.strip()
+                takeaways = [line.strip() for line in output.split("\n") if line.strip().startswith("-")]
+                logger.info("Key takeaways generated")
+                return takeaways if takeaways else ["- No significant trends identified."]
+            except openai.RateLimitError:
+                logger.warning(f"Rate limit hit for key takeaways, retrying in {2 ** attempt} seconds...")
+                time.sleep(2 ** attempt)
+            except Exception as e:
+                logger.error(f"Error generating takeaways: {e}")
+                return [f"- Error generating takeaways: {e}"]
+        logger.error("Rate limit exceeded for key takeaways")
+        return ["- Error: Rate limit exceeded"]
     except Exception as e:
-        logger.error(f"Error generating takeaways: {e}")
-        return [f"- Error generating takeaways: {e}"]
+        logger.error(f"Error in llm_key_takeaways setup: {e}")
+        return [f"- Error in llm_key_takeaways setup: {e}"]
 
 # --- Section 1: Load & Normalize ---
 st.sidebar.header("Load Data")
@@ -265,7 +432,7 @@ except Exception as e:
 
 if error:
     st.error(error)
-    logger.error(f"Displayed error: {e}")
+    logger.error(f"Displayed error: {error}")
 
 if df is not None and not df.empty:
     new_sig = _df_signature(df)
@@ -289,7 +456,6 @@ else:
     st.stop()
 
 # --- Embeddings ---
-@st.cache_resource
 def get_model():
     logger.info("Loading SBERT model")
     try:
@@ -298,6 +464,7 @@ def get_model():
         return model
     except Exception as e:
         logger.error(f"Error loading SBERT model: {e}")
+        st.error(f"Error loading SBERT model: {e}")
         raise
 
 @st.cache_data(show_spinner=False)
@@ -306,23 +473,26 @@ def embed_df_texts(df_in: pd.DataFrame):
     try:
         model = get_model()
         texts = concat_title_snippet(df_in)
-        emb = embed_texts(model, texts, show_progress=False)
+        emb = embed_texts(model, texts, show_progress=False, batch_size=16)
         logger.info("Texts embedded successfully")
         return emb
     except Exception as e:
         logger.error(f"Error embedding texts: {e}")
+        st.error(f"Error embedding texts: {e}")
         raise
 
 # --- Clustering with Narrative Generation ---
 st.header("Run Clusters")
 logger.info("Clusters header set")
 st.markdown("Use the sliding scale to set the number of narrative categories for your data. You can always adjust it to capture the main narratives more exactly.")
-k = st.slider("Number of clusters", 2, 8, 4, 1)  # Reduced max clusters
+k = st.slider("Number of clusters", 2, 8, 4, 1)
 logger.info(f"Cluster slider set to {k}")
 if st.button("Run clustering"):
     with st.spinner("We are generating narratives for you - this should take about 60 seconds. Perhaps another cup of coffee? ☕"):
         logger.info("Clustering started")
         try:
+            model = get_model()  # Load model only when clustering
+            logger.info("Model loaded for clustering")
             embeddings = embed_df_texts(st.session_state["df"])
             labels, _ = run_kmeans(embeddings, n_clusters=k)
             df_clustered = attach_clusters(st.session_state["df"], labels)
@@ -330,7 +500,6 @@ if st.button("Run clustering"):
             st.session_state["embeddings"] = embeddings
             st.session_state["clustered"] = True
             logger.info("Clustering completed")
-            # Generate narratives
             labels_map = {}
             short_labels_map = {}
             narratives = {}
@@ -379,17 +548,15 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     short_labels_map = st.session_state["short_labels_map"]
     narratives = st.session_state["narratives"]
     logger.info("Main display variables set")
-    # Display Narratives with short headers
     st.subheader("Narratives")
     for i, cid in enumerate(sorted(narratives.keys()), start=1):
         st.write(f"{i}. **{short_labels_map[cid]}**: {narratives[cid]}")
     logger.info("Narratives displayed")
-    # Bar Chart of Narrative Volumes with horizontal short labels
-    volume_data = dfc["Cluster"].value_counts().reset_index()
-    volume_data.columns = ["Cluster", "Volume"]
-    volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
     st.subheader("Narrative Volumes")
     try:
+        volume_data = dfc["Cluster"].value_counts().reset_index()
+        volume_data.columns = ["Cluster", "Volume"]
+        volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
         fig_volumes = px.bar(
             volume_data,
             x="Narrative",
@@ -444,7 +611,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     except Exception as e:
         logger.error(f"Error displaying narrative volumes chart: {e}")
         st.error(f"Error displaying narrative volumes chart: {e}")
-    # Timeline of Narratives (Volume Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
     timeline_data = None
     if date_column and dfc[date_column].notna().any():
@@ -544,7 +710,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
         logger.warning("No date column for timeline")
-    # Top 10 Posters Analysis
     st.subheader("Top Posters Analysis")
     logger.info("Top posters section started")
     if 'author' in dfc.columns:
@@ -653,7 +818,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 except Exception as e:
                     logger.error(f"Error displaying engagement chart: {e}")
                     st.error(f"Error displaying engagement chart: {e}")
-    # Top Authors by Theme Bar Charts
     st.subheader("Top Authors by Theme")
     logger.info("Top authors by theme section started")
     if 'author' in dfc.columns:
@@ -707,7 +871,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 else:
                     st.warning(f"No valid data for bar chart of {narrative}")
                     logger.warning(f"No valid data for {narrative}")
-    # Wut Means? Key Takeaways
     st.subheader("Wut Means? 🤔 Key Takeaways")
     logger.info("Key takeaways section started")
     if narratives and not volume_data.empty:
