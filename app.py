@@ -754,62 +754,26 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 )
                 st.plotly_chart(fig_engagement_authors, config=dict(responsive=True))
 
-    # Author-Theme Correlation
-    st.subheader("Author-Theme Correlation")
+    # Author-Theme Top Contributors
+    st.subheader("Top Authors by Theme")
     if 'author' in dfc.columns:
-        # Compute correlation (post counts by author and cluster)
-        correlation_data = dfc.groupby(['author', 'display_label', 'Cluster']).size().reset_index(name='Volume').pivot_table(
-            index=['author', 'display_label'], columns='Cluster', values='Volume', fill_value=0
-        )
-        # Select top 10 authors by volume
-        top_authors = volume_by_author[['author', 'display_label']].set_index('author')['display_label']
-        correlation_data = correlation_data.loc[correlation_data.index.get_level_values('author').isin(top_authors.index)]
-        if not correlation_data.empty:
-            # Map cluster IDs to short labels
-            correlation_data.columns = [short_labels_map.get(col, f"Cluster {col}") for col in correlation_data.columns]
-            # Use display_label for visualization
-            correlation_data = correlation_data.reset_index().set_index('display_label').drop(columns='author')
-            # Create heatmap
-            fig_correlation = px.imshow(
-                correlation_data,
-                labels=dict(x="Narrative", y="Poster", color="Post Count"),
-                title="Poster-Narrative Correlation (Post Counts)",
-                color_continuous_scale="Viridis",
-                aspect="auto",
-                text_auto=True,
-                height=600
-            )
-            fig_correlation.update_layout(
-                font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-                title=dict(text="Poster-Narrative Correlation (Post Counts)", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
-                xaxis=dict(title="Narrative", title_font=dict(size=14), tickfont=dict(size=14), tickangle=45),
-                yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=14)),
-                plot_bgcolor="rgba(247,249,252,0.8)",
-                paper_bgcolor="rgba(255,255,255,0)",
-                margin=dict(l=50, r=50, t=80, b=50),
-                hovermode="closest",
-                hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
-            )
-            # Add annotation for highest correlation
-            max_value = correlation_data.max().max()
-            max_loc = np.where(correlation_data == max_value)
-            max_author = correlation_data.index[max_loc[0][0]]
-            max_narrative = correlation_data.columns[max_loc[1][0]]
-            fig_correlation.add_annotation(
-                x=max_narrative,
-                y=max_author,
-                text=f"Peak: {int(max_value)}",
-                showarrow=True,
-                arrowhead=2,
-                ax=20,
-                ay=-30,
-                font=dict(size=12, color="#1a3c6d")
-            )
-            st.plotly_chart(fig_correlation, config=dict(responsive=True))
-        else:
-            st.warning("No data available for poster-theme correlation. Ensure posters and clusters are present.")
-    else:
-        st.warning("No 'author' or 'Influencer' column found in dataset. Poster-theme correlation skipped. Ensure your CSV includes an 'Influencer' column.")
+        # Group by Cluster and author to count posts
+        author_counts = dfc.groupby(['Cluster', 'author']).size().reset_index(name='PostCount')
+        # Map Cluster to Narrative labels
+        author_counts['Narrative'] = author_counts['Cluster'].map(short_labels_map)
+        # Get top 5 authors per narrative
+        top_authors_per_theme = {}
+        for narrative in short_labels_map.values():
+            theme_data = author_counts[author_counts['Narrative'] == narrative].nlargest(5, 'PostCount')
+            if not theme_data.empty:
+                top_authors_per_theme[narrative] = theme_data[['author', 'PostCount']].values.tolist()
+        
+        # Display top authors for each theme
+        for narrative, authors in top_authors_per_theme.items():
+            st.write(f"**{narrative}**")
+            for author, count in authors:
+                st.write(f"- {author} ({count} posts)")
+            st.write("---")  # Separator between themes
 
     # Wut Means? Key Takeaways
     st.subheader("Wut Means? 🤔 Key Takeaways")
@@ -819,7 +783,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             volume_data,
             volume_by_author,
             engagement_by_author,
-            correlation_data,
+            pd.DataFrame(),  # Empty correlation_data since heatmap is removed
             timeline_data
         )
         for takeaway in takeaways:
