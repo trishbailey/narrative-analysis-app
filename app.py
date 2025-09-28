@@ -441,14 +441,29 @@ def embed_df_texts(df_in: pd.DataFrame):
     from sklearn.feature_extraction.text import TfidfVectorizer
     
     st.info("Creating embeddings from text features...")
+    
+    # Ensure we have valid texts
+    texts = [str(t) for t in texts if t and str(t).strip()]
+    
+    if len(texts) == 0:
+        st.error("No valid texts found for embedding")
+        return None
+        
     vectorizer = TfidfVectorizer(
         max_features=300,
         stop_words='english',
-        ngram_range=(1, 2)
+        ngram_range=(1, 2),
+        min_df=1,  # Don't exclude any terms
+        max_df=0.95
     )
     
-    embeddings = vectorizer.fit_transform(texts).toarray()
-    return embeddings
+    try:
+        embeddings = vectorizer.fit_transform(texts).toarray()
+        st.success(f"Created embeddings with shape: {embeddings.shape}")
+        return embeddings
+    except Exception as e:
+        st.error(f"Error creating embeddings: {e}")
+        return None
 
 # --- Clustering with Narrative Generation ---
 st.header("Run Clusters")
@@ -462,7 +477,12 @@ if st.button("Run clustering"):
             embeddings = embed_df_texts(st.session_state["df"])
             
             if embeddings is not None:
+                st.write(f"Debug: DataFrame has {len(st.session_state['df'])} rows")
+                st.write(f"Debug: Embeddings shape is {embeddings.shape}")
+                
                 labels, _ = run_kmeans(embeddings, n_clusters=k)
+                st.write(f"Debug: Found {len(set(labels))} unique clusters")
+                
                 df_clustered = attach_clusters(st.session_state["df"], labels)
                 st.session_state["df"] = df_clustered
                 st.session_state["embeddings"] = embeddings
