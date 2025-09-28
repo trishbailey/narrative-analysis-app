@@ -1,3 +1,7 @@
+import os
+# Hugging Face Spaces fix
+if not os.path.exists('/home/user/.streamlit'):
+    os.makedirs('/home/user/.streamlit', exist_ok=True)
 import streamlit as st
 import pandas as pd
 import numpy as np
