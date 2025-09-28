@@ -427,7 +427,7 @@ if df is not None and not df.empty:
     else:
         st.write("Dataset Uploaded Successfully! 🎉")
 else:
-    if "df" in st.session_state:
+if "df" in st.session_state:
         st.info("Run clustering to generate narratives.")
     else:
         st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet, Influencer. Optional: Date, URL, Twitter Screen Name, Likes, Reposts, Replies.")
