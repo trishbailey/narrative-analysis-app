@@ -10,14 +10,20 @@ import re
 import datetime as _dt
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
+from sklearn.cluster import KMeans
 from collections import Counter
 import openai
 import io
 
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto
-from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
+# Removed: from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
 from narrative.narrative_cluster import run_kmeans, attach_clusters
+
+# --- Helper function to replace the one from narrative_embed ---
+def concat_title_snippet(df):
+    """Concatenate Title and Snippet columns."""
+    return df.apply(lambda x: f"{x['Title']} {x['Snippet']}", axis=1).tolist()
 
 # --- Modified normalize_to_canonical to preserve Influencer, Twitter Screen Name, and engagement metrics ---
 def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
@@ -270,9 +276,10 @@ st.title("Narrative Analysis")
 
 # --- API Setup ---
 api_key = os.getenv("XAI_API_KEY")
+client = None
+
 if not api_key:
     st.error("XAI_API_KEY not found. Please add it to environment variables.")
-    st.stop()
 else:
     client = openai.OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
 
@@ -304,6 +311,9 @@ def central_indexes(emb, mask_idx, k=5):
     return [mask_idx[i] for i in order]
 
 def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
+    if not client:
+        return f"API not configured", f"Narrative {cid}", f"Cluster {cid}"
+    
     combined_text = "\n\n".join(texts)
     prompt = (
         "Create a fresh, original summary of the main gist of these social media posts clustered around a theme. "
@@ -334,6 +344,9 @@ def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_vol
     Generate AI-driven key takeaways using Grok based on narratives, volumes, top posters, and correlations.
     Returns a list of bullet points with insights.
     """
+    if not client:
+        return ["- API not configured for takeaway generation."]
+    
     # Prepare input data for Grok
     narrative_summary = "\n".join([f"Narrative {i+1} ({short_labels_map.get(cid, 'Unknown')}: {narratives.get(cid, 'No summary')}" for i, cid in enumerate(sorted(narratives.keys()))])
     volume_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts" for _, row in volume_data.iterrows()])
@@ -420,49 +433,83 @@ else:
         st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet, Influencer. Optional: Date, URL, Twitter Screen Name, Likes, Reposts, Replies.")
     st.stop()
 
-# --- Embeddings ---
-@st.cache_resource
-def get_model():
-    return load_sbert("all-MiniLM-L6-v2")
-
+# --- Embeddings using OpenAI/x.ai ---
 @st.cache_data(show_spinner=False)
 def embed_df_texts(df_in: pd.DataFrame):
-    model = get_model()
+    if not client:
+        st.error("API client not initialized. Cannot create embeddings.")
+        return None
+    
     texts = concat_title_snippet(df_in)
-    emb = embed_texts(model, texts, show_progress=False)
-    return emb
+    
+    # Use OpenAI/x.ai embeddings
+    embeddings = []
+    batch_size = 100
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i+batch_size]
+        status_text.text(f"Creating embeddings... {i}/{len(texts)}")
+        
+        try:
+            response = client.embeddings.create(
+                model="text-embedding-3-small",
+                input=batch
+            )
+            embeddings.extend([e.embedding for e in response.data])
+        except Exception as e:
+            st.error(f"Embedding error: {e}")
+            progress_bar.empty()
+            status_text.empty()
+            return None
+        
+        progress_bar.progress((i + len(batch)) / len(texts))
+    
+    progress_bar.empty()
+    status_text.empty()
+    return np.array(embeddings)
 
 # --- Clustering with Narrative Generation ---
 st.header("Run Clusters")
 st.markdown("Use the sliding scale to set the number of narrative categories for your data. You can always adjust it to capture the main narratives more exactly.")
 k = st.slider("Number of clusters", 2, 12, 6, 1)
 if st.button("Run clustering"):
-    with st.spinner("We are generating narratives for you - this should take about 60 seconds. Perhaps another cup of coffee? ☕"):
-        embeddings = embed_df_texts(st.session_state["df"])
-        labels, _ = run_kmeans(embeddings, n_clusters=k)
-        df_clustered = attach_clusters(st.session_state["df"], labels)
-        st.session_state["df"] = df_clustered
-        st.session_state["embeddings"] = embeddings
-        st.session_state["clustered"] = True
-        # Generate narratives
-        labels_map = {}
-        short_labels_map = {}
-        narratives = {}
-        for cid in sorted(df_clustered["Cluster"].unique()):
-            mask_idx = np.where(df_clustered["Cluster"].values == cid)[0]
-            if len(mask_idx) == 0:
-                continue
-            top_idx = central_indexes(embeddings, mask_idx, k=5)
-            central_texts = [" ".join([str(df_clustered.iloc[i].get("Title", "") or ""), first_sentence(df_clustered.iloc[i].get("Snippet", ""))]).strip() for i in top_idx]
-            summary, detailed_label, short_label = llm_narrative_summary(central_texts, cid)
-            labels_map[cid] = detailed_label
-            short_labels_map[cid] = short_label
-            narratives[cid] = summary
-        st.session_state["labels_map"] = labels_map
-        st.session_state["short_labels_map"] = short_labels_map
-        st.session_state["narratives"] = narratives
-        st.session_state["narratives_generated"] = True
-    st.success("Clustering and narrative generation complete.")
+    if not client:
+        st.error("Cannot run clustering without API access. Please ensure XAI_API_KEY is set.")
+    else:
+        with st.spinner("We are generating narratives for you - this should take about 60 seconds. Perhaps another cup of coffee? ☕"):
+            embeddings = embed_df_texts(st.session_state["df"])
+            
+            if embeddings is not None:
+                labels, _ = run_kmeans(embeddings, n_clusters=k)
+                df_clustered = attach_clusters(st.session_state["df"], labels)
+                st.session_state["df"] = df_clustered
+                st.session_state["embeddings"] = embeddings
+                st.session_state["clustered"] = True
+                
+                # Generate narratives
+                labels_map = {}
+                short_labels_map = {}
+                narratives = {}
+                for cid in sorted(df_clustered["Cluster"].unique()):
+                    mask_idx = np.where(df_clustered["Cluster"].values == cid)[0]
+                    if len(mask_idx) == 0:
+                        continue
+                    top_idx = central_indexes(embeddings, mask_idx, k=5)
+                    central_texts = [" ".join([str(df_clustered.iloc[i].get("Title", "") or ""), first_sentence(df_clustered.iloc[i].get("Snippet", ""))]).strip() for i in top_idx]
+                    summary, detailed_label, short_label = llm_narrative_summary(central_texts, cid)
+                    labels_map[cid] = detailed_label
+                    short_labels_map[cid] = short_label
+                    narratives[cid] = summary
+                st.session_state["labels_map"] = labels_map
+                st.session_state["short_labels_map"] = short_labels_map
+                st.session_state["narratives"] = narratives
+                st.session_state["narratives_generated"] = True
+                st.success("Clustering and narrative generation complete.")
+            else:
+                st.error("Failed to create embeddings. Check your API key and try again.")
 
 # --- Custom Color Palette ---
 COLOR_PALETTE = [
