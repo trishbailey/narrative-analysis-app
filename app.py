@@ -783,9 +783,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                             title=f"Top Authors for {narrative}",
                             color='author',
                             color_discrete_sequence=COLOR_PALETTE[:len(authors)],
-                            text='PostCount',
-                            textposition='auto'
+                            text='PostCount'
                         )
+                        fig.update_traces(textposition='auto')
                         fig.update_traces(
                             marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9)
                         )
