@@ -14,14 +14,16 @@ from sklearn.cluster import KMeans
 from collections import Counter
 import openai
 import io
+
 # --- Reusable modules ---
 from narrative.narrative_io import read_csv_auto
-# Removed: from narrative.narrative_embed import load_sbert, concat_title_snippet, embed_texts
 from narrative.narrative_cluster import run_kmeans, attach_clusters
+
 # --- Helper function to replace the one from narrative_embed ---
 def concat_title_snippet(df):
     """Concatenate Title and Snippet columns."""
     return df.apply(lambda x: f"{x['Title']} {x['Snippet']}", axis=1).tolist()
+
 # --- Modified normalize_to_canonical to preserve Influencer, Twitter Screen Name, and engagement metrics ---
 def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
     """
@@ -30,15 +32,13 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
     Handles Meltwater X columns like Opening Text / Hit Sentence / Parent URL / Alternate Date Format / Time.
     Preserves Influencer as author, Twitter Screen Name as display_name, and engagement metrics.
     """
-    # Map normalized -> original names
-    norm2orig: dict[str, str] = {}
-    cols_norm: list[str] = []
+    norm2orig = {}
+    cols_norm = []
     for c in df_raw.columns:
         k = re.sub(r"\s+|_", "", c.strip().lower())
         norm2orig[k] = c
         cols_norm.append(k)
    
-    # Canonical alias lists
     ALIASES = {
         "title": ["title", "headline", "headlines", "inputname", "keywords"],
         "snippet": ["snippet", "summary", "description", "dek", "selftext", "selftext_html", "body", "text", "openingtext", "hitsentence"],
@@ -53,7 +53,7 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
         "shares": ["shares", "Shares"],
         "reactions": ["reactions", "Reactions"]
     }
-    # Identify common fields
+    
     title_key = next((k for k in ALIASES["title"] if k in norm2orig), None)
     snippet_key = next((k for k in ALIASES["snippet"] if k in norm2orig), None)
     date_key = next((k for k in ALIASES["date"] if k in norm2orig), None)
@@ -66,13 +66,13 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
     comments_key = next((k for k in ALIASES["comments"] if k in norm2orig), None)
     shares_key = next((k for k in ALIASES["shares"] if k in norm2orig), None)
     reactions_key = next((k for k in ALIASES["reactions"] if k in norm2orig), None)
-    # --- MELTWATER-SPECIFIC TITLE/SNIPPET LOGIC ---
+
     headline = norm2orig.get("headline")
     hitsent = norm2orig.get("hitsentence")
     opentxt = norm2orig.get("openingtext")
     inputname = norm2orig.get("inputname")
     keywords = norm2orig.get("keywords")
-    # Build Title
+
     if headline:
         title_series = df_raw[headline].fillna("").astype(str).str.strip()
     elif hitsent:
@@ -89,7 +89,7 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
             if k in norm2orig:
                 s = df_raw[norm2orig[k]].fillna("").astype(str).str.strip()
                 title_series = title_series.mask(~title_series.astype(bool), s)
-    # Build Snippet
+
     if opentxt:
         snippet_series = df_raw[opentxt].fillna("").astype(str).str.strip()
     elif hitsent:
@@ -102,22 +102,20 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
             if k in norm2orig:
                 s = df_raw[norm2orig[k]].fillna("").astype(str).str.strip()
                 snippet_series = snippet_series.mask(~snippet_series.astype(bool), s)
-    # Build Date
+
     def _parse_meltwater_datetime(df: pd.DataFrame, norm2orig: dict) -> pd.Series:
         def _coerce(s: pd.Series) -> pd.Series:
             s = s.astype(str).str.replace(r'(?i)(am|pm)$', r' \1', regex=True)
-            # Try multiple date formats to reduce parsing warnings
             formats = [
-                "%d-%b-%Y %I:%M%p", # e.g., 15-Sep-2025 02:55PM
-                "%Y-%m-%d %H:%M:%S", # e.g., 2025-09-15 14:55:00
-                "%m/%d/%Y %I:%M %p", # e.g., 09/15/2025 02:55 PM
-                "%d/%m/%Y %H:%M" # e.g., 15/09/2025 14:55
+                "%d-%b-%Y %I:%M%p",
+                "%Y-%m-%d %H:%M:%S",
+                "%m/%d/%Y %I:%M %p",
+                "%d/%m/%Y %H:%M"
             ]
             result = pd.Series(pd.NaT, index=s.index)
             for fmt in formats:
                 temp = pd.to_datetime(s, errors="coerce", format=fmt, dayfirst=True)
                 result = result.fillna(temp)
-            # Fallback to dateutil if all formats fail
             if result.isna().any():
                 temp = pd.to_datetime(s, errors="coerce", dayfirst=True)
                 result = result.fillna(temp)
@@ -137,29 +135,28 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
             d2 = _coerce(combo)
             d = d.fillna(d2)
         return d
+
     if date_key:
         date_series = _parse_meltwater_datetime(df_raw, norm2orig)
     else:
         date_series = _parse_meltwater_datetime(df_raw, norm2orig)
-    # Build URL
+
     if "parenturl" in norm2orig:
         url_series = df_raw[norm2orig["parenturl"]].fillna("").astype(str).str.strip()
     elif url_key:
         url_series = df_raw[norm2orig[url_key]].fillna("").astype(str).str.strip()
     else:
         url_series = pd.Series([""] * len(df_raw), dtype=object)
-    # Build Author (Influencer)
+
     author_series = df_raw[norm2orig[author_key]].fillna("").astype(str).str.strip() if author_key else pd.Series([""] * len(df_raw), dtype=object)
-    # Build Display Name (Twitter Screen Name)
     display_name_series = df_raw[norm2orig[display_name_key]].fillna("").astype(str).str.strip() if display_name_key else pd.Series([""] * len(df_raw), dtype=object)
-    # Build Engagement Columns
     likes_series = df_raw[norm2orig[likes_key]].fillna(0).astype(float) if likes_key else pd.Series([0] * len(df_raw), dtype=float)
     retweets_series = df_raw[norm2orig[retweets_key]].fillna(0).astype(float) if retweets_key else pd.Series([0] * len(df_raw), dtype=float)
     replies_series = df_raw[norm2orig[replies_key]].fillna(0).astype(float) if replies_key else pd.Series([0] * len(df_raw), dtype=float)
     comments_series = df_raw[norm2orig[comments_key]].fillna(0).astype(float) if comments_key else pd.Series([0] * len(df_raw), dtype=float)
     shares_series = df_raw[norm2orig[shares_key]].fillna(0).astype(float) if shares_key else pd.Series([0] * len(df_raw), dtype=float)
     reactions_series = df_raw[norm2orig[reactions_key]].fillna(0).astype(float) if reactions_key else pd.Series([0] * len(df_raw), dtype=float)
-    # Assemble canonical DataFrame
+
     df = pd.DataFrame({
         "Title": title_series,
         "Snippet": snippet_series,
@@ -174,14 +171,14 @@ def normalize_to_canonical(df_raw: pd.DataFrame) -> pd.DataFrame:
         "Shares": shares_series,
         "Reactions": reactions_series
     })
-    # Clean rows: require either Title or Snippet
+
     df = df[(df["Title"].str.len() > 0) | (df["Snippet"].str.len() > 0)].copy()
     df.drop_duplicates(subset=["Title", "Snippet"], inplace=True)
     df.reset_index(drop=True, inplace=True)
     return df
+
 # --- Page setup ---
 st.set_page_config(page_title="Narrative Analysis", layout="wide")
-# Custom CSS for a polished look with updated sidebar background
 st.markdown("""
     <style>
     .main .block-container {
@@ -206,8 +203,8 @@ st.markdown("""
         background-color: #1a3c6d;
         color: white;
         border-radius: 6px;
-        padding: 0.2rem 0.4rem; /* Reduced padding for smaller buttons */
-        font-size: 11px; /* Smaller font */
+        padding: 0.2rem 0.4rem;
+        font-size: 11px;
     }
     .stButton>button:hover {
         background-color: #2e5aa8;
@@ -256,13 +253,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 st.title("Narrative Analysis")
+
 # --- API Setup ---
 api_key = os.getenv("XAI_API_KEY")
 client = None
 if not api_key:
-    st.error("XAI_API_KEY not found. Please add it to environment variables.")
+    st.error("XAI_API_KEY not found. Please add it to Railway Variables.")
 else:
     client = openai.OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+st.write(f"API Key status: {'Loaded' if api_key else 'MISSING - Add XAI_API_KEY in Railway Variables!'}")
+
 # --- Helpers ---
 JUNK = {
     "rt", "please", "join", "join me", "link", "watch", "live", "breaking", "thanks", "thank", "proud",
@@ -271,6 +271,7 @@ JUNK = {
     "foxnews", "cnn", "msnbc", "youtube", "tiktok", "instagram", "facebook", "x", "twitter"
 }
 STOP = set(ENGLISH_STOP_WORDS) | {w for p in JUNK for w in p.split()}
+
 def first_sentence(text: str, max_len=180) -> str:
     text = str(text or "").strip()
     parts = re.split(r"(?<=[\.!?])\s+", text)
@@ -279,6 +280,7 @@ def first_sentence(text: str, max_len=180) -> str:
         if len(s) >= 25:
             return s[:max_len]
     return (text[:max_len] or "").strip()
+
 def central_indexes(emb, mask_idx, k=5):
     sub = emb[mask_idx]
     if len(sub) == 0:
@@ -287,6 +289,7 @@ def central_indexes(emb, mask_idx, k=5):
     sims = (centroid @ sub.T).ravel()
     order = sims.argsort()[::-1][:min(k, len(sims))]
     return [mask_idx[i] for i in order]
+
 def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
     if not client:
         return f"API not configured", f"Narrative {cid}", f"Cluster {cid}"
@@ -309,32 +312,32 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
             temperature=0.7
         )
         output = response.choices[0].message.content.strip()
-        # Robust parsing with regex fallback
-        summary_match = re.search(r"Summary:\s*(.*?)(?=\s*Detailed Label:|$)", output, re.DOTALL)
-        detailed_match = re.search(r"Detailed Label:\s*(.*?)(?=\s*Short Label:|$)", output, re.DOTALL)
-        short_match = re.search(r"Short Label:\s*(.*)", output, re.DOTALL)
-        summary = summary_match.group(1).strip() if summary_match else f"Summary for cluster {cid} unavailable"
+        st.write(f"Debug: Raw LLM response for cluster {cid}: {output}")
+        # Robust parsing with multiple fallbacks
+        summary_match = re.search(r"Summary:\s*(.*?)(?=\s*(Detailed Label:|$))", output, re.DOTALL | re.IGNORECASE)
+        detailed_match = re.search(r"Detailed Label:\s*(.*?)(?=\s*(Short Label:|$))", output, re.DOTALL | re.IGNORECASE)
+        short_match = re.search(r"Short Label:\s*(.*)", output, re.DOTALL | re.IGNORECASE)
+        summary = summary_match.group(1).strip() if summary_match else output[:50] if output else f"Summary for cluster {cid} unavailable"
         detailed_label = detailed_match.group(1).strip() if detailed_match else f"Narrative {cid}"
         short_label = short_match.group(1).strip() if short_match else f"Cluster {cid}"
+        # Extra fallback: if short_label is empty, use first few words of summary
+        if not short_label.strip() or short_label == f"Cluster {cid}":
+            short_label = " ".join(summary.split()[:3])[:20]
         return summary, detailed_label, short_label
     except Exception as e:
+        st.error(f"LLM error for cluster {cid}: {e}")
         return f"Error: {e}", f"Narrative {cid}", f"Cluster {cid}"
+
 def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_volume, top_authors_engagement, correlation_data, timeline_data=None, date_column=None):
-    """
-    Generate AI-driven key takeaways using Grok based on narratives, volumes, top posters, and correlations.
-    Returns a list of bullet points with insights.
-    """
     if not client:
         return ["- API not configured for takeaway generation."]
    
-    # Prepare input data for Grok
-    narrative_summary = "\n".join([f"Narrative {i+1} ({short_labels_map.get(cid, 'Unknown')}: {narratives.get(cid, 'No summary')}" for i, cid in enumerate(sorted(narratives.keys()))])
-    volume_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts" for _, row in volume_data.iterrows()])
+    narrative_summary = "\n".join([f"Narrative {i+1} ({short_labels_map.get(cid, 'Unknown')}): {narratives.get(cid, 'No summary')}" for i, cid in enumerate(sorted(narratives.keys()))])
+    volume_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts" for _, row in volume_data.iterrows()]) if not volume_data.empty else "No volume data."
     top_authors_volume_summary = "\n".join([f"{row['display_label']}: {row['Volume']} posts" for _, row in top_authors_volume.iterrows()]) if not top_authors_volume.empty else "No top authors by volume."
     top_authors_engagement_summary = "\n".join([f"{row['display_label']}: {row['Engagement']} engagement" for _, row in top_authors_engagement.iterrows()]) if not top_authors_engagement.empty else "No top authors by engagement."
     correlation_summary = "\n".join([f"{author}: {', '.join([f'{col}: {val}' for col, val in correlation_data.loc[author].items() if val > 0])}" for author in correlation_data.index]) if not correlation_data.empty else "No author-theme correlations."
    
-    # Handle timeline_data properly
     timeline_summary = "No timeline data."
     if timeline_data is not None and not timeline_data.empty and date_column:
         timeline_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts on {row[date_column].strftime('%Y-%m-%d')}" for _, row in timeline_data.iterrows()])
@@ -359,17 +362,18 @@ def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_vol
             temperature=0.7
         )
         output = response.choices[0].message.content.strip()
-        # Split into bullet points
+        st.write(f"Debug: Raw LLM response for takeaways: {output}")
         takeaways = [line.strip() for line in output.split("\n") if line.strip().startswith("-")]
         return takeaways if takeaways else ["- No significant trends identified."]
     except Exception as e:
+        st.error(f"LLM error for takeaways: {e}")
         return [f"- Error generating takeaways: {e}"]
-# --- Modified: Moved build_network_graph definition higher to fix NameError ---
+
 def build_network_graph(df, cluster_id, short_label):
     if 'author' not in df.columns or all(col not in df.columns for col in ['Retweets', 'Replies', 'Shares']):
         st.warning(f"Missing required columns (author and at least one of Retweets/Replies/Shares) for network graph of {short_label}.")
         return None
-    G = nx.Graph()  # Undirected graph
+    G = nx.Graph()
     cluster_df = df[df['Cluster'] == cluster_id].copy()
    
     author_activity = cluster_df.groupby('author').agg({
@@ -466,20 +470,23 @@ def build_network_graph(df, cluster_id, short_label):
                         xaxis=dict(showgrid=False, zeroline=False),
                         yaxis=dict(showgrid=False, zeroline=False)))
     return fig
+
 # --- Section 1: Load & Normalize ---
 st.sidebar.header("Load Data")
 uploaded = st.sidebar.file_uploader("Upload CSV (UTF-8 / UTF-16 / TSV)", type=["csv", "tsv"])
 if st.sidebar.button("Reset data & state"):
-    for k in ["df", "embeddings", "data_sig", "clustered", "labels", "baseline", "assigned_from_baseline", "narratives_generated"]:
+    for k in ["df", "embeddings", "data_sig", "clustered", "labels_map", "short_labels_map", "narratives", "narratives_generated"]:
         st.session_state.pop(k, None)
     st.success("State cleared. Upload to proceed.")
     st.stop()
+
 def _df_signature(d: pd.DataFrame):
     try:
         sig = (d.shape, pd.util.hash_pandas_object(d, index=True).sum())
     except Exception:
         sig = (d.shape, tuple(sorted(d.columns)))
     return sig
+
 df = None
 error = None
 try:
@@ -496,7 +503,7 @@ if df is not None and not df.empty:
     if ("data_sig" not in st.session_state) or (st.session_state["data_sig"] != new_sig):
         st.session_state["df"] = df.reset_index(drop=True)
         st.session_state["data_sig"] = new_sig
-        for k in ["embeddings", "clustered", "assigned_from_baseline", "labels", "narratives_generated"]:
+        for k in ["embeddings", "clustered", "labels_map", "short_labels_map", "narratives", "narratives_generated"]:
             st.session_state.pop(k, None)
         st.write("Dataset Uploaded Successfully! 🎉")
     else:
@@ -507,16 +514,14 @@ else:
     else:
         st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet, Influencer. Optional: Date, URL, Twitter Screen Name, Likes, Reposts, Replies.")
     st.stop()
-# --- Embeddings using OpenAI/x.ai ---
+
+# --- Embeddings using TF-IDF ---
 @st.cache_data(show_spinner=False)
 def embed_df_texts(df_in: pd.DataFrame):
     texts = concat_title_snippet(df_in)
    
-    from sklearn.feature_extraction.text import TfidfVectorizer
-   
     st.info("Creating embeddings from text features...")
    
-    # Ensure we have valid texts
     texts = [str(t) for t in texts if t and str(t).strip()]
    
     if len(texts) == 0:
@@ -527,7 +532,7 @@ def embed_df_texts(df_in: pd.DataFrame):
         max_features=300,
         stop_words='english',
         ngram_range=(1, 2),
-        min_df=1, # Don't exclude any terms
+        min_df=1,
         max_df=0.95
     )
    
@@ -538,15 +543,19 @@ def embed_df_texts(df_in: pd.DataFrame):
     except Exception as e:
         st.error(f"Error creating embeddings: {e}")
         return None
+
 # --- Clustering with Narrative Generation ---
 st.header("Run Clusters")
 st.markdown("Use the sliding scale to set the number of narrative categories for your data. You can always adjust it to capture the main narratives more exactly.")
-k = st.slider("Number of clusters", 2, 12, 6, 1)
+k = st.slider("Number of clusters", 2, 12, 2, 1)  # Default to 2 for testing
 if st.button("Run clustering"):
     if not client:
-        st.error("Cannot run clustering without API access. Please ensure XAI_API_KEY is set.")
+        st.error("Cannot run clustering without API access. Please ensure XAI_API_KEY is set in Railway Variables.")
     else:
         with st.spinner("We are generating narratives for you - this should take about 60 seconds. Perhaps another cup of coffee? ☕"):
+            # Clear previous state to avoid stale data
+            for k in ["embeddings", "clustered", "labels_map", "short_labels_map", "narratives", "narratives_generated"]:
+                st.session_state.pop(k, None)
             embeddings = embed_df_texts(st.session_state["df"])
            
             if embeddings is not None:
@@ -561,7 +570,6 @@ if st.button("Run clustering"):
                 st.session_state["embeddings"] = embeddings
                 st.session_state["clustered"] = True
                
-                # Generate narratives
                 labels_map = {}
                 short_labels_map = {}
                 narratives = {}
@@ -580,24 +588,16 @@ if st.button("Run clustering"):
                 st.session_state["narratives"] = narratives
                 st.session_state["narratives_generated"] = True
                 st.success("Clustering and narrative generation complete.")
-                st.rerun()  # Refresh to update display
+                st.rerun()
             else:
                 st.error("Failed to create embeddings. Check your API key and try again.")
+
 # --- Custom Color Palette ---
 COLOR_PALETTE = [
-    '#1a3c6d', # Deep Blue
-    '#d32f2f', # Red
-    '#2e7d32', # Green
-    '#f57c00', # Orange
-    '#6a1b9a', # Purple
-    '#0288d1', # Light Blue
-    '#c2185b', # Pink
-    '#388e3c', # Forest Green
-    '#f4a261', # Peach
-    '#00838f', # Cyan
-    '#8e24aa', # Violet
-    '#689f38' # Lime Green
+    '#1a3c6d', '#d32f2f', '#2e7d32', '#f57c00', '#6a1b9a', '#0288d1',
+    '#c2185b', '#388e3c', '#f4a261', '#00838f', '#8e24aa', '#689f38'
 ]
+
 # --- Main Display ---
 if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and "narratives_generated" in st.session_state:
     dfc = st.session_state["df"].copy()
@@ -609,22 +609,20 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     short_labels_map = st.session_state["short_labels_map"]
     narratives = st.session_state["narratives"]
    
-    # Debug expander
     with st.expander("Debug: DataFrame Preview After Clustering"):
         st.dataframe(dfc.head())
         st.write(f"Unique clusters: {dfc['Cluster'].unique()}")
         st.write(f"Short labels map: {short_labels_map}")
-   
-    # Display Narratives with short headers
+        st.write(f"Volume data preview: {dfc['Cluster'].value_counts().reset_index().to_dict()}")
+
     st.subheader("Narratives")
     for i, cid in enumerate(sorted(narratives.keys()), start=1):
         st.write(f"{i}. **{short_labels_map.get(cid, f'Cluster {cid}')}**: {narratives.get(cid, 'No summary available')}")
-   
-    # Bar Chart of Narrative Volumes with horizontal short labels
+
+    st.subheader("Narrative Volumes")
     volume_data = dfc["Cluster"].value_counts().reset_index()
     volume_data.columns = ["Cluster", "Volume"]
     volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
-    st.subheader("Narrative Volumes")
     if volume_data.empty or volume_data["Narrative"].isna().all():
         st.warning("No volume data available. Check if clusters were assigned or labels generated properly.")
     else:
@@ -636,22 +634,18 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             color="Narrative",
             color_discrete_sequence=COLOR_PALETTE
         )
-        # Enhance bar chart
         fig_volumes.update_traces(
-            marker=dict(
-                line=dict(width=1, color='#ffffff'),
-                opacity=0.9
-            ),
-            text="" # Remove text inside boxes
+            marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),
+            text=""
         )
         fig_volumes.update_layout(
             font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
             title=dict(text="Narrative Volumes", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
             xaxis=dict(
                 title="Narrative",
-                tickangle=0, # Labels straight horizontally
+                tickangle=0,
                 title_font=dict(size=14),
-                tickfont=dict(size=10), # Adjust font size to prevent overlap
+                tickfont=dict(size=10),
                 tickmode="array",
                 tickvals=volume_data["Narrative"],
                 ticktext=volume_data["Narrative"]
@@ -669,7 +663,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             hovermode="closest",
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
         )
-        # Add annotation for highest volume
         max_volume = volume_data["Volume"].max()
         max_narrative = volume_data[volume_data["Volume"] == max_volume]["Narrative"].iloc[0]
         fig_volumes.add_annotation(
@@ -683,8 +676,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             font=dict(size=12, color="#1a3c6d")
         )
         st.plotly_chart(fig_volumes, config=dict(responsive=True))
-   
-    # Timeline of Narratives (Volume Trend)
+
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
     timeline_data = None
     if date_column and dfc[date_column].notna().any():
@@ -693,7 +685,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         max_date = dfc[date_column].max()
         span_days = (max_date - min_date).days if pd.notnull(min_date) and pd.notnull(max_date) else 0
         if span_days > 0:
-            # Adaptive frequency based on time span
             if span_days <= 3:
                 freq = 'D'
             elif span_days < 7:
@@ -732,7 +723,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         line_shape='spline',
                         color_discrete_sequence=COLOR_PALETTE
                     )
-                    # Enhance line chart
                     fig_timeline.update_traces(
                         line=dict(width=3),
                         marker=dict(size=8, line=dict(width=1, color='#ffffff')),
@@ -763,7 +753,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         hovermode="x unified",
                         hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
                     )
-                    # Add annotation for highest volume point
                     max_volume_row = timeline_data.loc[timeline_data["Volume"].idxmax()]
                     fig_timeline.add_annotation(
                         x=max_volume_row[date_column],
@@ -782,22 +771,17 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             st.warning("Insufficient time span in data for trends. All dates are the same or invalid.")
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
-    # Initialize variables for Top Posters Analysis
+
     volume_by_author = pd.DataFrame({'author': [], 'display_label': [], 'Volume': []})
     engagement_by_author = pd.DataFrame({'author': [], 'display_label': [], 'Engagement': []})
-   
-    # Top 10 Posters Analysis
+
     st.subheader("Top Posters Analysis")
     if 'author' in dfc.columns:
-        # Create display label combining display_name and author
         dfc['display_label'] = dfc.apply(
             lambda x: f"{x['display_name']} ({x['author']})"[:40] if pd.notnull(x.get('display_name')) and x['display_name'] else x['author'][:40],
             axis=1
         )
-       
-        # Compute top 10 by volume
         volume_by_author = dfc.groupby(['author', 'display_label']).size().reset_index(name='Volume').nlargest(10, 'Volume')
-        # Compute top 10 by engagement
         engagement_cols = [col for col in ['Likes', 'Retweets', 'Replies', 'Comments', 'Shares', 'Reactions'] if col in dfc.columns]
         if engagement_cols:
             engagement_by_author = dfc.groupby(['author', 'display_label'])[engagement_cols].sum().sum(axis=1).reset_index(name='Engagement').nlargest(10, 'Engagement')
@@ -805,13 +789,10 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             engagement_by_author = pd.DataFrame({'author': [], 'display_label': [], 'Engagement': []})
             st.warning("No engagement columns (Likes, Retweets, Replies, Comments, Shares, Reactions) found in dataset. Engagement chart skipped.")
        
-        # Create two-column layout for bar charts
         col1, col2 = st.columns(2)
-       
-        # Volume Bar Chart
         with col1:
             if volume_by_author.empty:
-                st.warning("No data for top posters by volume.")
+                st.warning("No data for top posters by volume. Check if author data is present.")
             else:
                 fig_volume_authors = px.bar(
                     volume_by_author,
@@ -827,7 +808,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     text=volume_by_author['Volume'],
                     textposition='auto'
                 )
-                fig_volume_authors.update_layout(bargap=0.1, bargroupgap=0.1)
                 fig_volume_authors.update_layout(
                     font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
                     title=dict(text="Top 10 Posters by Volume", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
@@ -855,10 +835,9 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     )
                 st.plotly_chart(fig_volume_authors, config=dict(responsive=True))
        
-        # Engagement Bar Chart
         with col2:
             if engagement_by_author.empty:
-                st.warning("No data for top posters by engagement.")
+                st.warning("No data for top posters by engagement. Check engagement columns.")
             else:
                 fig_engagement_authors = px.bar(
                     engagement_by_author,
@@ -874,7 +853,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     text=engagement_by_author['Engagement'].round(0).astype(int),
                     textposition='auto'
                 )
-                fig_engagement_authors.update_layout(bargap=0.1, bargroupgap=0.1)
                 fig_engagement_authors.update_layout(
                     font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
                     title=dict(text="Top 10 Posters by Engagement", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
@@ -900,24 +878,20 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     font=dict(size=10, color="#1a3c6d")
                 )
                 st.plotly_chart(fig_engagement_authors, config=dict(responsive=True))
-    # Top Authors by Theme Bar Charts
+
     st.subheader("Top Authors by Theme")
     if 'author' in dfc.columns:
-        # Group by Cluster and author to count posts
         author_counts = dfc.groupby(['Cluster', 'author']).size().reset_index(name='PostCount')
-        # Map Cluster to Narrative labels
         author_counts['Narrative'] = author_counts['Cluster'].map(short_labels_map)
-        # Get top 5 authors per narrative
         top_authors_per_theme = {}
         for narrative in short_labels_map.values():
             theme_data = author_counts[author_counts['Narrative'] == narrative].nlargest(5, 'PostCount')
             if not theme_data.empty:
                 top_authors_per_theme[narrative] = theme_data[['author', 'PostCount']].values.tolist()
        
-        # Create two-column layout for bar charts
         for i in range(0, len(top_authors_per_theme), 2):
             cols = st.columns(2)
-            narratives_list = list(top_authors_per_theme.keys())  # Renamed to avoid conflict
+            narratives_list = list(top_authors_per_theme.keys())
             for j, col in enumerate(cols):
                 idx = i + j
                 if idx < len(narratives_list):
@@ -926,7 +900,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     if authors and len(authors) > 0:
                         df_theme = pd.DataFrame(authors, columns=['author', 'PostCount'])
                         if not df_theme.empty:
-                            # Ensure PostCount is numeric
                             df_theme['PostCount'] = pd.to_numeric(df_theme['PostCount'], errors='coerce')
                             if df_theme['PostCount'].notna().all() and df_theme['PostCount'].dtype in [np.int64, np.float64]:
                                 with col:
@@ -943,7 +916,6 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                                         marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),
                                         textposition='auto'
                                     )
-                                    fig.update_layout(bargap=0.1, bargroupgap=0.1)
                                     fig.update_layout(
                                         font=dict(family="Roboto, sans-serif", size=10, color="#1a3c6d"),
                                         title=dict(text=narrative, font=dict(size=12, color="#1a3c6d"), x=0.5, xanchor="center"),
@@ -961,24 +933,27 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                                 st.warning(f"Invalid numeric data for {narrative} bar chart. Check PostCount values.")
                         else:
                             st.warning(f"No valid data for bar chart of {narrative}")
-                    # Add network button here
                     if st.button("View Network Visualization", key=f"view_network_{idx}"):
                         with st.spinner("Generating network graph..."):
-                            network_fig = build_network_graph(dfc, author_counts[author_counts['Narrative'] == narrative]['Cluster'].iloc[0], narrative)
-                            if network_fig:
-                                st.plotly_chart(network_fig, config=dict(responsive=True))
+                            cluster_id = author_counts[author_counts['Narrative'] == narrative]['Cluster'].iloc[0] if not author_counts[author_counts['Narrative'] == narrative].empty else None
+                            if cluster_id is not None:
+                                network_fig = build_network_graph(dfc, cluster_id, narrative)
+                                if network_fig:
+                                    st.plotly_chart(network_fig, config=dict(responsive=True))
+                                else:
+                                    st.info(f"No network graph available for {narrative}.")
                             else:
-                                st.info("No network graph available for this theme.")
-    # Wut Means? Key Takeaways
+                                st.info(f"No cluster ID found for {narrative}.")
+
     st.subheader("Wut Means? 🤔 Key Takeaways")
-    if narratives and not volume_data.empty:
+    if narratives and not volume_data.empty and not volume_data["Narrative"].isna().all():
         takeaways = llm_key_takeaways(
             narratives,
             short_labels_map,
             volume_data,
             volume_by_author,
             engagement_by_author,
-            pd.DataFrame(), # Empty correlation_data since heatmap is removed
+            pd.DataFrame(),
             timeline_data,
             date_column
         )
