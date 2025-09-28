@@ -1,4 +1,4 @@
-streamlit
+streamlit==1.28.1
 sentence-transformers
 scikit-learn
 pandas
@@ -7,5 +7,3 @@ umap-learn
 nltk
 scipy
 openai
-sentence-transformers
-streamlit-confetti==0.1.0
