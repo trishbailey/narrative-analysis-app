@@ -1,7 +1,7 @@
-streamlit>=1.38.0
-pandas>=2.2.2
-numpy>=1.26.4
-plotly>=5.24.0
-scikit-learn>=1.5.1
-openai>=1.45.0
-networkx>=3.3
+streamlit==1.50.0
+pandas==2.3.2
+numpy==2.3.3
+plotly==6.3.0
+scikit-learn==1.7.2
+sentence-transformers==5.1.1
+openai==1.109.1
