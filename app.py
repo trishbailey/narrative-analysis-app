@@ -436,40 +436,22 @@ else:
 # --- Embeddings using OpenAI/x.ai ---
 @st.cache_data(show_spinner=False)
 def embed_df_texts(df_in: pd.DataFrame):
-    if not client:
-        st.error("API client not initialized. Cannot create embeddings.")
-        return None
-    
     texts = concat_title_snippet(df_in)
     
-    # Use OpenAI/x.ai embeddings
-    embeddings = []
-    batch_size = 100
+    # Use TF-IDF embeddings - effective for clustering without external APIs
+    from sklearn.feature_extraction.text import TfidfVectorizer
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    st.info("Creating embeddings from text features...")
+    vectorizer = TfidfVectorizer(
+        max_features=300,
+        stop_words='english',
+        ngram_range=(1, 2),  # Include bigrams for better context
+        min_df=2,  # Ignore very rare terms
+        max_df=0.95  # Ignore very common terms
+    )
     
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i+batch_size]
-        status_text.text(f"Creating embeddings... {i}/{len(texts)}")
-        
-        try:
-            response = client.embeddings.create(
-                model="text-embedding-3-small",
-                input=batch
-            )
-            embeddings.extend([e.embedding for e in response.data])
-        except Exception as e:
-            st.error(f"Embedding error: {e}")
-            progress_bar.empty()
-            status_text.empty()
-            return None
-        
-        progress_bar.progress((i + len(batch)) / len(texts))
-    
-    progress_bar.empty()
-    status_text.empty()
-    return np.array(embeddings)
+    embeddings = vectorizer.fit_transform(texts).toarray()
+    return embeddings
 
 # --- Clustering with Narrative Generation ---
 st.header("Run Clusters")
