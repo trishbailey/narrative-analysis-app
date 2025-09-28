@@ -1,4 +1,3 @@
-streamlit==1.28.1
 sentence-transformers
 scikit-learn
 pandas
@@ -7,3 +6,6 @@ umap-learn
 nltk
 scipy
 openai
+streamlit
+numpy
+networkx
