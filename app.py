@@ -12,7 +12,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from collections import Counter
 import openai
-import os
 import io
 
 # --- Reusable modules ---
@@ -270,10 +269,10 @@ st.markdown("""
 st.title("Narrative Analysis")
 
 # --- API Setup ---
-api_key = os.environ.get("XAI_API_KEY")
+api_key = os.getenv("XAI_API_KEY")
 if not api_key:
-    st.write(f"Debug - API Key found: {api_key is not None}")
-    st.write(f"Debug - All env vars: {list(os.environ.keys())}")
+    st.error("XAI_API_KEY not found. Please add it to environment variables.")
+    st.stop()
 else:
     client = openai.OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
 
@@ -330,7 +329,7 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
     except Exception as e:
         return f"Error: {e}", f"Narrative {cid}", f"Cluster {cid}"
 
-def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_volume, top_authors_engagement, correlation_data, timeline_data=None):
+def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_volume, top_authors_engagement, correlation_data, timeline_data=None, date_column=None):
     """
     Generate AI-driven key takeaways using Grok based on narratives, volumes, top posters, and correlations.
     Returns a list of bullet points with insights.
@@ -341,7 +340,11 @@ def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_vol
     top_authors_volume_summary = "\n".join([f"{row['display_label']}: {row['Volume']} posts" for _, row in top_authors_volume.iterrows()]) if not top_authors_volume.empty else "No top authors by volume."
     top_authors_engagement_summary = "\n".join([f"{row['display_label']}: {row['Engagement']} engagement" for _, row in top_authors_engagement.iterrows()]) if not top_authors_engagement.empty else "No top authors by engagement."
     correlation_summary = "\n".join([f"{author}: {', '.join([f'{col}: {val}' for col, val in correlation_data.loc[author].items() if val > 0])}" for author in correlation_data.index]) if not correlation_data.empty else "No author-theme correlations."
-    timeline_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts on {row[date_column].strftime('%Y-%m-%d')}" for _, row in timeline_data.iterrows()]) if timeline_data is not None and not timeline_data.empty else "No timeline data."
+    
+    # Handle timeline_data properly
+    timeline_summary = "No timeline data."
+    if timeline_data is not None and not timeline_data.empty and date_column:
+        timeline_summary = "\n".join([f"{row['Narrative']}: {row['Volume']} posts on {row[date_column].strftime('%Y-%m-%d')}" for _, row in timeline_data.iterrows()])
 
     prompt = (
         "Analyze the following social media data to identify 3-5 key takeaways about significant trends and insights. "
@@ -487,10 +490,12 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     labels_map = st.session_state["labels_map"]
     short_labels_map = st.session_state["short_labels_map"]
     narratives = st.session_state["narratives"]
+    
     # Display Narratives with short headers
     st.subheader("Narratives")
     for i, cid in enumerate(sorted(narratives.keys()), start=1):
         st.write(f"{i}. **{short_labels_map[cid]}**: {narratives[cid]}")
+    
     # Bar Chart of Narrative Volumes with horizontal short labels
     volume_data = dfc["Cluster"].value_counts().reset_index()
     volume_data.columns = ["Cluster", "Volume"]
@@ -551,6 +556,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         font=dict(size=12, color="#1a3c6d")
     )
     st.plotly_chart(fig_volumes, config=dict(responsive=True))
+    
     # Timeline of Narratives (Volume Trend)
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
     timeline_data = None
@@ -650,6 +656,10 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     else:
         st.warning("No 'Date' or 'published' column found or no valid dates. Add it to your dataset for the timeline.")
 
+    # Initialize variables for Top Posters Analysis
+    volume_by_author = pd.DataFrame({'author': [], 'display_label': [], 'Volume': []})
+    engagement_by_author = pd.DataFrame({'author': [], 'display_label': [], 'Engagement': []})
+    
     # Top 10 Posters Analysis
     st.subheader("Top Posters Analysis")
     if 'author' in dfc.columns:
@@ -940,12 +950,13 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     if narratives and not volume_data.empty:
         takeaways = llm_key_takeaways(
             narratives,
-            short_labels_map,  # Ensure short_labels_map is passed
+            short_labels_map,
             volume_data,
             volume_by_author,
             engagement_by_author,
             pd.DataFrame(),  # Empty correlation_data since heatmap is removed
-            timeline_data
+            timeline_data,
+            date_column
         )
         for takeaway in takeaways:
             st.markdown(takeaway)
@@ -953,7 +964,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
         st.warning("Insufficient data for key takeaways. Ensure narratives and volume data are available.")
 
 else:
-    if "df" in st.session_state and not "clustered" in st.session_state:
+    if "df" in st.session_state and "clustered" not in st.session_state:
         st.info("Run clustering to generate narratives.")
     else:
         st.info("Upload a CSV/TSV to proceed. Required: Title, Snippet, Influencer. Optional: Date, URL, Twitter Screen Name, Likes, Reposts, Replies.")
