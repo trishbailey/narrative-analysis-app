@@ -681,21 +681,21 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 orientation='h'
             )
             fig_volume_authors.update_traces(
-                marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),
+                marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9, size=8),  # Smaller bars
                 text=volume_by_author['Volume'],
                 textposition='auto'
             )
             fig_volume_authors.update_layout(
                 font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-                title=dict(text="Top 10 Posters by Volume", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
-                xaxis=dict(title="Post Count", title_font=dict(size=14), tickfont=dict(size=14)),
-                yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=14)),
+                title=dict(text="Top 10 Posters by Volume", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
+                xaxis=dict(title="Post Count", title_font=dict(size=12), tickfont=dict(size=10)),
+                yaxis=dict(title="Poster", title_font=dict(size=12), tickfont=dict(size=10)),
                 plot_bgcolor="rgba(247,249,252,0.8)",
                 paper_bgcolor="rgba(255,255,255,0)",
                 showlegend=False,
-                margin=dict(l=50, r=50, t=80, b=50),
+                margin=dict(l=30, r=30, t=40, b=30),  # Tightened margins
                 hovermode="closest",
-                hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
+                hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
             )
             if not volume_by_author.empty:
                 max_volume_author = volume_by_author.iloc[0]['display_label']
@@ -708,7 +708,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     arrowhead=2,
                     ax=20,
                     ay=-30,
-                    font=dict(size=12, color="#1a3c6d")
+                    font=dict(size=10, color="#1a3c6d")
                 )
             st.plotly_chart(fig_volume_authors, config=dict(responsive=True))
         
@@ -725,21 +725,21 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     orientation='h'
                 )
                 fig_engagement_authors.update_traces(
-                    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),
+                    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9, size=8),  # Smaller bars
                     text=engagement_by_author['Engagement'].round(0).astype(int),
                     textposition='auto'
                 )
                 fig_engagement_authors.update_layout(
                     font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-                    title=dict(text="Top 10 Posters by Engagement", font=dict(size=20, color="#1a3c6d"), x=0.5, xanchor="center"),
-                    xaxis=dict(title="Engagement (Likes + Reposts + Replies)", title_font=dict(size=14), tickfont=dict(size=14)),
-                    yaxis=dict(title="Poster", title_font=dict(size=14), tickfont=dict(size=14)),
+                    title=dict(text="Top 10 Posters by Engagement", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
+                    xaxis=dict(title="Engagement", title_font=dict(size=12), tickfont=dict(size=10)),
+                    yaxis=dict(title="Poster", title_font=dict(size=12), tickfont=dict(size=10)),
                     plot_bgcolor="rgba(247,249,252,0.8)",
                     paper_bgcolor="rgba(255,255,255,0)",
                     showlegend=False,
-                    margin=dict(l=50, r=50, t=80, b=50),
+                    margin=dict(l=30, r=30, t=40, b=30),  # Tightened margins
                     hovermode="closest",
-                    hoverlabel=dict(bgcolor="white", font_size=12, font_family="Roboto")
+                    hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
                 )
                 max_engagement_author = engagement_by_author.iloc[0]['display_label']
                 max_engagement_value = engagement_by_author.iloc[0]['Engagement']
@@ -751,7 +751,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     arrowhead=2,
                     ax=20,
                     ay=-30,
-                    font=dict(size=12, color="#1a3c6d")
+                    font=dict(size=10, color="#1a3c6d")
                 )
                 st.plotly_chart(fig_engagement_authors, config=dict(responsive=True))
 
@@ -769,44 +769,52 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             if not theme_data.empty:
                 top_authors_per_theme[narrative] = theme_data[['author', 'PostCount']].values.tolist()
         
-        # Create bar charts for each theme with error handling
-        for narrative, authors in top_authors_per_theme.items():
-            if authors and len(authors) > 0:
-                df_theme = pd.DataFrame(authors, columns=['author', 'PostCount'])
-                if not df_theme.empty:
-                    # Ensure PostCount is numeric
-                    df_theme['PostCount'] = pd.to_numeric(df_theme['PostCount'], errors='coerce')
-                    if df_theme['PostCount'].notna().all() and df_theme['PostCount'].dtype in [np.int64, np.float64]:
-                        fig = px.bar(
-                            df_theme,
-                            x='author',
-                            y='PostCount',
-                            title=f"Top Authors for {narrative}",
-                            color='author',
-                            color_discrete_sequence=COLOR_PALETTE[:len(authors)],
-                            text='PostCount'
-                        )
-                        fig.update_traces(textposition='auto')
-                        fig.update_traces(
-                            marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9)
-                        )
-                        fig.update_layout(
-                            font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-                            title=dict(text=f"Top Authors for {narrative}", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
-                            xaxis=dict(title="Author", title_font=dict(size=12), tickfont=dict(size=10), tickangle=0),
-                            yaxis=dict(title="Post Count", title_font=dict(size=12), tickfont=dict(size=10), gridcolor="rgba(0,0,0,0.1)"),
-                            plot_bgcolor="rgba(247,249,252,0.8)",
-                            paper_bgcolor="rgba(255,255,255,0)",
-                            showlegend=False,
-                            margin=dict(l=50, r=50, t=50, b=50),
-                            hovermode="closest",
-                            hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
-                        )
-                        st.plotly_chart(fig, config=dict(responsive=True))
-                    else:
-                        st.warning(f"Invalid numeric data for {narrative} bar chart. Check PostCount values.")
-                else:
-                    st.warning(f"No valid data for bar chart of {narrative}")
+        # Create two-column layout for bar charts
+        for i in range(0, len(top_authors_per_theme), 2):
+            cols = st.columns(2)
+            narratives = list(top_authors_per_theme.keys())
+            for j, col in enumerate(cols):
+                idx = i + j
+                if idx < len(narratives):
+                    narrative = narratives[idx]
+                    authors = top_authors_per_theme[narrative]
+                    if authors and len(authors) > 0:
+                        df_theme = pd.DataFrame(authors, columns=['author', 'PostCount'])
+                        if not df_theme.empty:
+                            # Ensure PostCount is numeric
+                            df_theme['PostCount'] = pd.to_numeric(df_theme['PostCount'], errors='coerce')
+                            if df_theme['PostCount'].notna().all() and df_theme['PostCount'].dtype in [np.int64, np.float64]:
+                                with col:
+                                    fig = px.bar(
+                                        df_theme,
+                                        x='author',
+                                        y='PostCount',
+                                        title=f"{narrative}",
+                                        color='author',
+                                        color_discrete_sequence=COLOR_PALETTE[:len(authors)],
+                                        text='PostCount'
+                                    )
+                                    fig.update_traces(
+                                        marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9, size=8),  # Smaller bars
+                                        textposition='auto'
+                                    )
+                                    fig.update_layout(
+                                        font=dict(family="Roboto, sans-serif", size=10, color="#1a3c6d"),
+                                        title=dict(text=narrative, font=dict(size=12, color="#1a3c6d"), x=0.5, xanchor="center"),
+                                        xaxis=dict(title="Author", title_font=dict(size=10), tickfont=dict(size=8), tickangle=0),
+                                        yaxis=dict(title="Post Count", title_font=dict(size=10), tickfont=dict(size=8), gridcolor="rgba(0,0,0,0.1)"),
+                                        plot_bgcolor="rgba(247,249,252,0.8)",
+                                        paper_bgcolor="rgba(255,255,255,0)",
+                                        showlegend=False,
+                                        margin=dict(l=30, r=30, t=40, b=30),  # Tightened margins
+                                        hovermode="closest",
+                                        hoverlabel=dict(bgcolor="white", font_size=8, font_family="Roboto")
+                                    )
+                                    st.plotly_chart(fig, config=dict(responsive=True))
+                            else:
+                                st.warning(f"Invalid numeric data for {narrative} bar chart. Check PostCount values.")
+                        else:
+                            st.warning(f"No valid data for bar chart of {narrative}")
 
     # Network Graphs by Theme
     st.subheader("Network Graphs by Theme")
@@ -896,7 +904,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             fig = go.Figure(data=[edge_trace, node_trace],
                           layout=go.Layout(
                               title=f"Network Graph for {short_label}",
-                              titlefont_size=16,
+                              title_font_size=16,  # Fixed typo from titlefont_size
                               showlegend=False,
                               hovermode='closest',
                               margin=dict(b=20, l=5, r=5, t=40),
