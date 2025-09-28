@@ -681,36 +681,37 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 orientation='h'
             )
             fig_volume_authors.update_traces(
-                marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),  # Smaller bars
-                text=volume_by_author['Volume'],
-                textposition='auto'
-            )
-            fig_volume_authors.update_layout(bargap=0.1, bargroupgap=0.1)
-                font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-                title=dict(text="Top 10 Posters by Volume", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
-                xaxis=dict(title="Post Count", title_font=dict(size=12), tickfont=dict(size=10)),
-                yaxis=dict(title="Poster", title_font=dict(size=12), tickfont=dict(size=10)),
-                plot_bgcolor="rgba(247,249,252,0.8)",
-                paper_bgcolor="rgba(255,255,255,0)",
-                showlegend=False,
-                margin=dict(l=30, r=30, t=40, b=30),  # Tightened margins
-                hovermode="closest",
-                hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
-            )
-            if not volume_by_author.empty:
-                max_volume_author = volume_by_author.iloc[0]['display_label']
-                max_volume_value = volume_by_author.iloc[0]['Volume']
-                fig_volume_authors.add_annotation(
-                    x=max_volume_value,
-                    y=max_volume_author,
-                    text=f"Top: {max_volume_value}",
-                    showarrow=True,
-                    arrowhead=2,
-                    ax=20,
-                    ay=-30,
-                    font=dict(size=10, color="#1a3c6d")
-                )
-            st.plotly_chart(fig_volume_authors, config=dict(responsive=True))
+    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),  # Removed size=8
+    text=volume_by_author['Volume'],
+    textposition='auto'
+)
+fig_volume_authors.update_layout(bargap=0.1, bargroupgap=0.1)  # Adjusts spacing, smaller bars visually
+fig_volume_authors.update_layout(
+    font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),  # Corrected indentation
+    title=dict(text="Top 10 Posters by Volume", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
+    xaxis=dict(title="Post Count", title_font=dict(size=12), tickfont=dict(size=10)),
+    yaxis=dict(title="Poster", title_font=dict(size=12), tickfont=dict(size=10)),
+    plot_bgcolor="rgba(247,249,252,0.8)",
+    paper_bgcolor="rgba(255,255,255,0)",
+    showlegend=False,
+    margin=dict(l=30, r=30, t=40, b=30),
+    hovermode="closest",
+    hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
+)
+if not volume_by_author.empty:
+    max_volume_author = volume_by_author.iloc[0]['display_label']
+    max_volume_value = volume_by_author.iloc[0]['Volume']
+    fig_volume_authors.add_annotation(
+        x=max_volume_value,
+        y=max_volume_author,
+        text=f"Top: {max_volume_value}",
+        showarrow=True,
+        arrowhead=2,
+        ax=20,
+        ay=-30,
+        font=dict(size=10, color="#1a3c6d")
+    )
+st.plotly_chart(fig_volume_authors, config=dict(responsive=True))
         
         # Engagement Bar Chart
         with col2:
@@ -725,35 +726,37 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     orientation='h'
                 )
                 fig_engagement_authors.update_traces(
-                    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),  # Smaller bars
-                    text=engagement_by_author['Engagement'].round(0).astype(int),
-                    textposition='auto'
-                )
-                fig_engagement_authors.update_layout(bargap=0.1, bargroupgap=0.1)
-                    font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),
-                    title=dict(text="Top 10 Posters by Engagement", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
-                    xaxis=dict(title="Engagement", title_font=dict(size=12), tickfont=dict(size=10)),
-                    yaxis=dict(title="Poster", title_font=dict(size=12), tickfont=dict(size=10)),
-                    plot_bgcolor="rgba(247,249,252,0.8)",
-                    paper_bgcolor="rgba(255,255,255,0)",
-                    showlegend=False,
-                    margin=dict(l=30, r=30, t=40, b=30),  # Tightened margins
-                    hovermode="closest",
-                    hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
-                )
-                max_engagement_author = engagement_by_author.iloc[0]['display_label']
-                max_engagement_value = engagement_by_author.iloc[0]['Engagement']
-                fig_engagement_authors.add_annotation(
-                    x=max_engagement_value,
-                    y=max_engagement_author,
-                    text=f"Top: {int(max_engagement_value)}",
-                    showarrow=True,
-                    arrowhead=2,
-                    ax=20,
-                    ay=-30,
-                    font=dict(size=10, color="#1a3c6d")
-                )
-                st.plotly_chart(fig_engagement_authors, config=dict(responsive=True))
+    marker=dict(line=dict(width=1, color='#ffffff'), opacity=0.9),  # Removed size=8
+    text=engagement_by_author['Engagement'].round(0).astype(int),
+    textposition='auto'
+)
+fig_engagement_authors.update_layout(bargap=0.1, bargroupgap=0.1)  # Adjusts spacing, smaller bars visually
+fig_engagement_authors.update_layout(
+    font=dict(family="Roboto, sans-serif", size=12, color="#1a3c6d"),  # Corrected indentation
+    title=dict(text="Top 10 Posters by Engagement", font=dict(size=16, color="#1a3c6d"), x=0.5, xanchor="center"),
+    xaxis=dict(title="Engagement", title_font=dict(size=12), tickfont=dict(size=10)),
+    yaxis=dict(title="Poster", title_font=dict(size=12), tickfont=dict(size=10)),
+    plot_bgcolor="rgba(247,249,252,0.8)",
+    paper_bgcolor="rgba(255,255,255,0)",
+    showlegend=False,
+    margin=dict(l=30, r=30, t=40, b=30),
+    hovermode="closest",
+    hoverlabel=dict(bgcolor="white", font_size=10, font_family="Roboto")
+)
+if not engagement_by_author.empty:
+    max_engagement_author = engagement_by_author.iloc[0]['display_label']
+    max_engagement_value = engagement_by_author.iloc[0]['Engagement']
+    fig_engagement_authors.add_annotation(
+        x=max_engagement_value,
+        y=max_engagement_author,
+        text=f"Top: {int(max_engagement_value)}",
+        showarrow=True,
+        arrowhead=2,
+        ax=20,
+        ay=-30,
+        font=dict(size=10, color="#1a3c6d")
+    )
+st.plotly_chart(fig_engagement_authors, config=dict(responsive=True))
 
     # Top Authors by Theme Bar Charts
     st.subheader("Top Authors by Theme")
