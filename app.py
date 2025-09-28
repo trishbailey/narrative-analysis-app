@@ -270,7 +270,7 @@ st.markdown("""
 st.title("Narrative Analysis")
 
 # --- API Setup ---
-   api_key = os.environ.get("XAI_API_KEY")
+api_key = os.environ.get("XAI_API_KEY")
 if not api_key:
     st.write(f"Debug - API Key found: {api_key is not None}")
     st.write(f"Debug - All env vars: {list(os.environ.keys())}")
