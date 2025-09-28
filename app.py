@@ -622,7 +622,10 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
     st.subheader("Narrative Volumes")
     volume_data = dfc["Cluster"].value_counts().reset_index()
     volume_data.columns = ["Cluster", "Volume"]
+    volume_data["Cluster"] = volume_data["Cluster"].astype(int)  # Force int for mapping
     volume_data["Narrative"] = volume_data["Cluster"].map(short_labels_map)
+    volume_data["Narrative"] = volume_data["Narrative"].fillna(volume_data["Cluster"].apply(lambda x: f"Cluster {x}"))  # Fill NaN with default
+    st.dataframe(volume_data)  # Show raw data for debug
     if volume_data.empty or volume_data["Narrative"].isna().all():
         st.warning("No volume data available. Check if clusters were assigned or labels generated properly.")
     else:
@@ -675,7 +678,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
             ay=-30,
             font=dict(size=12, color="#1a3c6d")
         )
-        st.plotly_chart(fig_volumes, config=dict(responsive=True))
+        st.plotly_chart(fig_volumes, config={'responsive': True, 'staticPlot': True})  # Add staticPlot to avoid rendering issues
 
     date_column = next((col for col in ["Date", "published"] if col in dfc.columns), None)
     timeline_data = None
@@ -707,7 +710,10 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                 x_title = 'Period'
             try:
                 timeline_data = dfc.groupby(["Cluster", pd.Grouper(key=date_column, freq=freq)]).size().reset_index(name="Volume")
+                timeline_data["Cluster"] = timeline_data["Cluster"].astype(int)  # Force int
                 timeline_data["Narrative"] = timeline_data["Cluster"].map(short_labels_map)
+                timeline_data["Narrative"] = timeline_data["Narrative"].fillna(timeline_data["Cluster"].apply(lambda x: f"Cluster {x}"))
+                st.dataframe(timeline_data)  # Show for debug
                 if timeline_data.empty or timeline_data["Volume"].sum() == 0:
                     st.warning("No data available for the timeline. Ensure there are posts across multiple time periods.")
                 else:
@@ -764,7 +770,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         ay=-30,
                         font=dict(size=12, color="#1a3c6d")
                     )
-                    st.plotly_chart(fig_timeline, config=dict(responsive=True))
+                    st.plotly_chart(fig_timeline, config={'responsive': True, 'staticPlot': True})
             except KeyError:
                 st.warning(f"No valid {date_column} data for timeline. Ensure dates are properly formatted.")
         else:
@@ -833,7 +839,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         ay=-30,
                         font=dict(size=10, color="#1a3c6d")
                     )
-                st.plotly_chart(fig_volume_authors, config=dict(responsive=True))
+                st.plotly_chart(fig_volume_authors, config={'responsive': True, 'staticPlot': True})
        
         with col2:
             if engagement_by_author.empty:
@@ -877,25 +883,30 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                     ay=-30,
                     font=dict(size=10, color="#1a3c6d")
                 )
-                st.plotly_chart(fig_engagement_authors, config=dict(responsive=True))
+                st.plotly_chart(fig_engagement_authors, config={'responsive': True, 'staticPlot': True})
 
     st.subheader("Top Authors by Theme")
     if 'author' in dfc.columns:
         author_counts = dfc.groupby(['Cluster', 'author']).size().reset_index(name='PostCount')
+        author_counts['Cluster'] = author_counts['Cluster'].astype(int)
         author_counts['Narrative'] = author_counts['Cluster'].map(short_labels_map)
+        author_counts['Narrative'] = author_counts['Narrative'].fillna(author_counts['Cluster'].apply(lambda x: f"Cluster {x}"))
+        st.dataframe(author_counts)  # Show for debug
         top_authors_per_theme = {}
         for narrative in short_labels_map.values():
             theme_data = author_counts[author_counts['Narrative'] == narrative].nlargest(5, 'PostCount')
             if not theme_data.empty:
                 top_authors_per_theme[narrative] = theme_data[['author', 'PostCount']].values.tolist()
        
-        for i in range(0, len(top_authors_per_theme), 2):
+        # Limit to 4 themes to avoid too many charts
+        themes_to_show = list(top_authors_per_theme.keys())[:4]
+        st.write(f"Showing top authors for first 4 themes to avoid rendering issues (total themes: {len(top_authors_per_theme)})")
+        for i in range(0, len(themes_to_show), 2):
             cols = st.columns(2)
-            narratives_list = list(top_authors_per_theme.keys())
             for j, col in enumerate(cols):
                 idx = i + j
-                if idx < len(narratives_list):
-                    narrative = narratives_list[idx]
+                if idx < len(themes_to_show):
+                    narrative = themes_to_show[idx]
                     authors = top_authors_per_theme[narrative]
                     if authors and len(authors) > 0:
                         df_theme = pd.DataFrame(authors, columns=['author', 'PostCount'])
@@ -928,7 +939,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                                         hovermode="closest",
                                         hoverlabel=dict(bgcolor="white", font_size=8, font_family="Roboto")
                                     )
-                                    st.plotly_chart(fig, config=dict(responsive=True))
+                                    st.plotly_chart(fig, config={'responsive': True, 'staticPlot': True})
                             else:
                                 st.warning(f"Invalid numeric data for {narrative} bar chart. Check PostCount values.")
                         else:
@@ -939,7 +950,7 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                             if cluster_id is not None:
                                 network_fig = build_network_graph(dfc, cluster_id, narrative)
                                 if network_fig:
-                                    st.plotly_chart(network_fig, config=dict(responsive=True))
+                                    st.plotly_chart(network_fig, config={'responsive': True, 'staticPlot': True})
                                 else:
                                     st.info(f"No network graph available for {narrative}.")
                             else:
