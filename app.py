@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import networkx as nx
 import re
 import datetime as _dt
 from sklearn.metrics.pairwise import cosine_similarity
@@ -806,6 +807,114 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         st.warning(f"Invalid numeric data for {narrative} bar chart. Check PostCount values.")
                 else:
                     st.warning(f"No valid data for bar chart of {narrative}")
+
+    # Network Graphs by Theme
+    st.subheader("Network Graphs by Theme")
+    if 'author' in dfc.columns and any(col in dfc.columns for col in ['Retweets', 'Replies', 'Shares']):
+        # Function to build network graph for a theme
+        def build_network_graph(df, cluster_id, short_label):
+            G = nx.DiGraph()
+            cluster_df = df[df['Cluster'] == cluster_id].copy()
+            
+            # Add nodes (authors)
+            authors = cluster_df['author'].dropna().unique()
+            for author in authors:
+                G.add_node(author)
+            
+            # Add edges based on retweets, replies, and shares
+            for index, row in cluster_df.iterrows():
+                source = row['author']
+                if pd.notna(source):
+                    # Retweets
+                    if pd.notna(row['Retweets']) and row['Retweets'] > 0:
+                        # Simplified: Assume Retweets indicates influence from original poster (needs Tweet Id for precision)
+                        # Here, we use a placeholder; ideally, link via Tweet Id to original author
+                        for target in authors:
+                            if target != source:  # Avoid self-loops
+                                G.add_edge(source, target, weight=row['Retweets'])
+                    # Replies (simplified; needs threading data for accuracy)
+                    if pd.notna(row['Replies']) and row['Replies'] > 0:
+                        for target in authors:
+                            if target != source:
+                                G.add_edge(source, target, weight=row['Replies'])
+                    # Shares (similar simplification)
+                    if pd.notna(row['Shares']) and row['Shares'] > 0:
+                        for target in authors:
+                            if target != source:
+                                G.add_edge(source, target, weight=row['Shares'])
+            
+            # Remove nodes with no edges if any
+            G.remove_nodes_from(list(nx.isolates(G)))
+            
+            if G.number_of_nodes() == 0:
+                st.warning(f"No connections found for {short_label}")
+                return None
+            
+            # Compute degree centrality (out-degree for influence)
+            centrality = nx.degree_centrality(G)
+            pos = nx.spring_layout(G)
+            edge_x = []
+            edge_y = []
+            for edge in G.edges():
+                x0, y0 = pos[edge[0]]
+                x1, y1 = pos[edge[1]]
+                edge_x.extend([x0, x1, None])
+                edge_y.extend([y0, y1, None])
+            
+            edge_trace = go.Scatter(
+                x=edge_x, y=edge_y,
+                line=dict(width=0.5, color='#888'),
+                hoverinfo='none',
+                mode='lines')
+            
+            node_x = []
+            node_y = []
+            node_text = []
+            node_color = []
+            for node in G.nodes():
+                x, y = pos[node]
+                node_x.append(x)
+                node_y.append(y)
+                centrality_score = centrality[node]
+                node_text.append(f"{node}<br>Influence: {centrality_score:.3f}")
+                # Color by influence (higher centrality = darker blue)
+                node_color.append(min(1, centrality_score * 5))  # Scale to 0-1 for color intensity
+            
+            node_trace = go.Scatter(
+                x=node_x, y=node_y,
+                mode='markers+text',
+                hoverinfo='text',
+                text=[node.split('<br>')[0] for node in node_text],  # Show only name on node
+                textposition="top center",
+                marker=dict(
+                    showscale=False,
+                    color=node_color,
+                    colorscale='Blues',
+                    size=10,
+                    line_width=2))
+            
+            fig = go.Figure(data=[edge_trace, node_trace],
+                          layout=go.Layout(
+                              title=f"Network Graph for {short_label}",
+                              titlefont_size=16,
+                              showlegend=False,
+                              hovermode='closest',
+                              margin=dict(b=20, l=5, r=5, t=40),
+                              annotations=[dict(
+                                  text="",
+                                  showarrow=False,
+                                  xref="paper", yref="paper",
+                                  x=0.005, y=-0.002)],
+                              xaxis=dict(showgrid=False, zeroline=False),
+                              yaxis=dict(showgrid=False, zeroline=False)))
+            fig.update_layout(plot_bgcolor="rgba(247,249,252,0.8)")
+            return fig
+        
+        # Generate network graph for each theme
+        for cid, short_label in short_labels_map.items():
+            network_fig = build_network_graph(dfc, cid, short_label)
+            if network_fig:
+                st.plotly_chart(network_fig, config=dict(responsive=True))
 
     # Wut Means? Key Takeaways
     st.subheader("Wut Means? 🤔 Key Takeaways")
