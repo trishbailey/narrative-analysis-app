@@ -303,7 +303,7 @@ def llm_narrative_summary(texts: list[str], cid) -> tuple[str, str, str]:
     )
     try:
         response = client.chat.completions.create(
-            model="grok-beta",
+            model="grok-4-fast",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0.7
@@ -353,7 +353,7 @@ def llm_key_takeaways(narratives, short_labels_map, volume_data, top_authors_vol
     )
     try:
         response = client.chat.completions.create(
-            model="grok-beta",
+            model="grok-4-fast",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
             temperature=0.7
