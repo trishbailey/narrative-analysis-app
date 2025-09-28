@@ -878,15 +878,14 @@ if "df" in st.session_state and "Cluster" in st.session_state["df"].columns and 
                         else:
                             st.warning(f"No valid data for bar chart of {narrative}")
 
-    # Network Graphs by Theme
-   # Network Graphs by Theme (Optional)
-st.subheader("Network Graphs by Theme")
-if 'author' in dfc.columns and any(col in dfc.columns for col in ['Retweets', 'Replies', 'Shares']):
-    if st.button("Generate Network Graphs (may take a moment)"):
-        # Function to build network graph for a theme
-        def build_network_graph(df, cluster_id, short_label):
-            G = nx.Graph()  # Changed to undirected graph
-            cluster_df = df[df['Cluster'] == cluster_id].copy()
+    # Network Graphs by Theme (Optional)
+    st.subheader("Network Graphs by Theme")
+    if 'author' in dfc.columns and any(col in dfc.columns for col in ['Retweets', 'Replies', 'Shares']):
+        if st.button("Generate Network Graphs (may take a moment)"):
+            # Function to build network graph for a theme
+            def build_network_graph(df, cluster_id, short_label):
+                G = nx.Graph()  # Changed to undirected graph
+                cluster_df = df[df['Cluster'] == cluster_id].copy()
             
             # Only add nodes for authors with significant activity
             author_activity = cluster_df.groupby('author').agg({
